@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MovementType {
+  RECEIPT
+  ISSUE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+enum DocStatus {
+  DRAFT
+  CONFIRMED
+  PARTIALLY_DELIVERED
+  DELIVERED
+  INVOICED
+  CLOSED
+}
+
+model User {
+  id        Int        @id @default(autoincrement())
+  email     String     @unique
+  name      String?
+  role      String     @default("stock")
+  createdAt DateTime   @default(now())
+  movements Movement[]
+}
+
+model Warehouse {
+  id        Int        @id @default(autoincrement())
+  code      String     @unique
+  name      String
+  locations Location[]
+  createdAt DateTime   @default(now())
+}
+
+model Location {
+  id            Int        @id @default(autoincrement())
+  warehouseId   Int
+  code          String
+  label         String
+  warehouse     Warehouse  @relation(fields: [warehouseId], references: [id])
+  movementsFrom Movement[] @relation("FromLocation")
+  movementsTo   Movement[] @relation("ToLocation")
+
+  @@unique([warehouseId, code])
+}
+
+model Item {
+  id        Int        @id @default(autoincrement())
+  sku       String     @unique
+  name      String
+  family    String?
+  unit      String     @default("pcs")
+  active    Boolean    @default(true)
+  lots      Lot[]
+  movements Movement[]
+  createdAt DateTime   @default(now())
+}
+
+model Lot {
+  id          Int        @id @default(autoincrement())
+  itemId      Int
+  code        String
+  supplierRef String?
+  receivedAt  DateTime?
+  status      String     @default("AVAILABLE")
+  item        Item       @relation(fields: [itemId], references: [id])
+  movements   Movement[]
+
+  @@unique([itemId, code])
+}
+
+model Movement {
+  id             Int          @id @default(autoincrement())
+  movedAt        DateTime     @default(now())
+  itemId         Int
+  lotId          Int?
+  type           MovementType
+  quantity       Decimal      @db.Decimal(18, 4)
+  referenceType  String
+  referenceId    String
+  note           String?
+  createdById    Int
+  fromLocationId Int?
+  toLocationId   Int?
+
+  item         Item      @relation(fields: [itemId], references: [id])
+  lot          Lot?      @relation(fields: [lotId], references: [id])
+  createdBy    User      @relation(fields: [createdById], references: [id])
+  fromLocation Location? @relation("FromLocation", fields: [fromLocationId], references: [id])
+  toLocation   Location? @relation("ToLocation", fields: [toLocationId], references: [id])
+
+  @@index([itemId])
+  @@index([lotId])
+  @@index([movedAt])
+}
+
+model SalesOrder {
+  id           Int       @id @default(autoincrement())
+  number       String    @unique
+  customerName String
+  status       DocStatus @default(DRAFT)
+  createdAt    DateTime  @default(now())
+  lines        SalesOrderLine[]
+}
+
+model SalesOrderLine {
+  id       Int        @id @default(autoincrement())
+  orderId  Int
+  itemId   Int
+  qty      Decimal    @db.Decimal(18, 4)
+  qtyDone  Decimal    @default(0) @db.Decimal(18, 4)
+  order    SalesOrder @relation(fields: [orderId], references: [id])
+}
+
+model PurchaseOrder {
+  id           Int       @id @default(autoincrement())
+  number       String    @unique
+  supplierName String
+  status       DocStatus @default(DRAFT)
+  createdAt    DateTime  @default(now())
+  lines        PurchaseOrderLine[]
+}
+
+model PurchaseOrderLine {
+  id       Int           @id @default(autoincrement())
+  orderId  Int
+  itemId   Int
+  qty      Decimal       @db.Decimal(18, 4)
+  qtyDone  Decimal       @default(0) @db.Decimal(18, 4)
+  order    PurchaseOrder @relation(fields: [orderId], references: [id])
+}
+
+model DeliveryNote {
+  id        Int       @id @default(autoincrement())
+  number    String    @unique
+  orderId   Int
+  status    DocStatus @default(DRAFT)
+  createdAt DateTime  @default(now())
+}
+
+model Invoice {
+  id        Int       @id @default(autoincrement())
+  number    String    @unique
+  blId      Int
+  status    DocStatus @default(DRAFT)
+  amount    Decimal   @db.Decimal(18, 2)
+  createdAt DateTime  @default(now())
+}

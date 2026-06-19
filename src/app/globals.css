@@ -1,0 +1,12 @@
+:root {
+  --bg: #f7f6f2;
+  --surface: #fbfbf9;
+  --border: #d4d1ca;
+  --text: #28251d;
+  --muted: #6c6a65;
+  --primary: #01696f;
+  --primary-fg: #f9f8f4;
+  --radius: .75rem;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); }
