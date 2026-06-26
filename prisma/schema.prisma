@@ -107,26 +107,27 @@ model Location {
 // ─────────────────────────────────────────────
 
 model Supplier {
-  id        Int       @id @default(autoincrement())
-  code      String    @unique
-  name      String
-  address   String?
-  cp        String?
-  city      String?
-  countryId Int?
-  phone     String?
-  email     String?
-  contact1  String?
-  phone1    String?
-  email1    String?
-  langue    String?   @default("FR")
-  delaiHabituel Int?  // délai de livraison habituel en jours
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id            Int       @id @default(autoincrement())
+  code          String    @unique
+  name          String
+  address       String?
+  cp            String?
+  city          String?
+  countryId     Int?
+  phone         String?
+  email         String?
+  contact1      String?
+  phone1        String?
+  email1        String?
+  langue        String?   @default("FR")
+  delaiHabituel Int?      // délai de livraison habituel en jours
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   country        Country?        @relation(fields: [countryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
+  lots           StockLot[]      // lots reçus de ce fournisseur
 
   @@index([countryId])
 }
@@ -157,40 +158,40 @@ model CustomerGroup {
 }
 
 model Customer {
-  id                    Int            @id @default(autoincrement())
-  code                  String         @unique
+  id                 Int            @id @default(autoincrement())
+  code               String         @unique
   // Identité
-  prenom                String?
-  nom                   String?
-  etablissement         String?
+  prenom             String?
+  nom                String?
+  etablissement      String?
   // Coordonnées
-  phone                 String?
-  email                 String?
-  langue                String?        @default("FR")
-  numTVA                String?
+  phone              String?
+  email              String?
+  langue             String?        @default("FR")
+  numTVA             String?
   // Adresse de livraison
-  adresseLivraison      String?
-  cpLivraison           String?
-  villeLivraison        String?
+  adresseLivraison   String?
+  cpLivraison        String?
+  villeLivraison     String?
   // Adresse de facturation (peut être différente)
-  adresseFacturation    String?
-  cpFacturation         String?
-  villeFacturation      String?
+  adresseFacturation String?
+  cpFacturation      String?
+  villeFacturation   String?
   // Contact BL
-  contactBL             String?
-  telBL                 String?
+  contactBL          String?
+  telBL              String?
   // Contact facturation
-  contactFact           String?
-  telFact               String?
+  contactFact        String?
+  telFact            String?
   // Paramètres commerciaux
-  fraisDePort           Decimal?       @db.Decimal(18, 2)
-  codeTarif             String?
+  fraisDePort        Decimal?       @db.Decimal(18, 2)
+  codeTarif          String?
   // Relations
-  countryId             Int?
-  groupId               Int?
-  isActive              Boolean        @default(true)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  countryId          Int?
+  groupId            Int?
+  isActive           Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   country    Country?       @relation(fields: [countryId], references: [id], onDelete: SetNull)
   group      CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
@@ -337,6 +338,7 @@ model StockLot {
 
   @@unique([articleId, lotNumber])
   @@index([articleId])
+  @@index([supplierId])
   @@index([status])
 }
 
@@ -359,21 +361,20 @@ model MovementReason {
 // ─────────────────────────────────────────────
 
 model Movement {
-  id              Int        @id @default(autoincrement())
-  movedAt         DateTime   @default(now())
-  direction       MovementDirection
-  type            MovementType
-  quantity        Decimal    @db.Decimal(18, 4)
-  referenceType   String
-  referenceId     String
-  note            String?
-  // Motif de mouvement (pour stats)
-  reasonId        Int?
-  itemId          Int
-  lotId           Int?
-  createdById     Int
-  fromLocationId  Int?
-  toLocationId    Int?
+  id             Int               @id @default(autoincrement())
+  movedAt        DateTime          @default(now())
+  direction      MovementDirection
+  type           MovementType
+  quantity       Decimal           @db.Decimal(18, 4)
+  referenceType  String
+  referenceId    String
+  note           String?
+  reasonId       Int?
+  itemId         Int
+  lotId          Int?
+  createdById    Int
+  fromLocationId Int?
+  toLocationId   Int?
 
   reason       MovementReason? @relation(fields: [reasonId], references: [id], onDelete: SetNull)
   item         Article         @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -417,26 +418,19 @@ model StockMovementLine {
 // ─────────────────────────────────────────────
 
 model SalesOrder {
-  id                 Int        @id @default(autoincrement())
-  number             String     @unique
-  customerId         Int?
-  status             DocStatus  @default(DRAFT)
-  // Référence côté client
-  referenceClient    String?
-  // Devis
-  numDevis           String?
-  // Devise
-  devise             String     @default("EUR")
-  // Délai de livraison
-  delai              String?
-  // Dates
-  createdAt          DateTime   @default(now())
-  dateFacturation    DateTime?
-  dateEncaissement   DateTime?
-  // Montant total
-  prixTotal          Decimal?   @db.Decimal(18, 2)
-  // Commentaire
-  commentaire        String?
+  id               Int       @id @default(autoincrement())
+  number           String    @unique
+  customerId       Int?
+  status           DocStatus @default(DRAFT)
+  referenceClient  String?
+  numDevis         String?
+  devise           String    @default("EUR")
+  delai            String?
+  createdAt        DateTime  @default(now())
+  dateFacturation  DateTime?
+  dateEncaissement DateTime?
+  prixTotal        Decimal?  @db.Decimal(18, 2)
+  commentaire      String?
 
   customer      Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
   lines         SalesOrderLine[]
@@ -446,14 +440,13 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
-  id         Int     @id @default(autoincrement())
-  orderId    Int
-  itemId     Int
-  qty        Decimal @db.Decimal(18, 4)
-  qtyDone    Decimal @default(0) @db.Decimal(18, 4)
-  // Prix unitaire négocié sur cette ligne
-  unitPrice  Decimal? @db.Decimal(18, 4)
-  prixTotal  Decimal? @db.Decimal(18, 4)
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  itemId    Int
+  qty       Decimal  @db.Decimal(18, 4)
+  qtyDone   Decimal  @default(0) @db.Decimal(18, 4)
+  unitPrice Decimal? @db.Decimal(18, 4)
+  prixTotal Decimal? @db.Decimal(18, 4)
 
   order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Article    @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -467,16 +460,14 @@ model SalesOrderLine {
 // ─────────────────────────────────────────────
 
 model PurchaseOrder {
-  id                   Int       @id @default(autoincrement())
-  number               String    @unique
-  supplierId           Int?
-  status               DocStatus @default(DRAFT)
-  // Dates clés
-  createdAt            DateTime  @default(now())
-  dateLivraisonPrevue  DateTime?
-  dateLivraisonReelle  DateTime?
-  // Commentaire
-  commentaire          String?
+  id                  Int       @id @default(autoincrement())
+  number              String    @unique
+  supplierId          Int?
+  status              DocStatus @default(DRAFT)
+  createdAt           DateTime  @default(now())
+  dateLivraisonPrevue DateTime?
+  dateLivraisonReelle DateTime?
+  commentaire         String?
 
   supplier Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   lines    PurchaseOrderLine[]
@@ -485,11 +476,11 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderLine {
-  id        Int     @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   orderId   Int
   itemId    Int
-  qty       Decimal @db.Decimal(18, 4)
-  qtyDone   Decimal @default(0) @db.Decimal(18, 4)
+  qty       Decimal  @db.Decimal(18, 4)
+  qtyDone   Decimal  @default(0) @db.Decimal(18, 4)
   unitPrice Decimal? @db.Decimal(18, 4)
 
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -517,15 +508,15 @@ model DeliveryNote {
 }
 
 model Invoice {
-  id           Int       @id @default(autoincrement())
-  number       String    @unique
-  blId         Int
-  status       DocStatus @default(DRAFT)
-  amount       Decimal   @db.Decimal(18, 2)
-  createdAt    DateTime  @default(now())
-  dateEcheance DateTime?
+  id               Int       @id @default(autoincrement())
+  number           String    @unique
+  blId             Int
+  status           DocStatus @default(DRAFT)
+  amount           Decimal   @db.Decimal(18, 2)
+  createdAt        DateTime  @default(now())
+  dateEcheance     DateTime?
   dateEncaissement DateTime?
-  commentaire  String?
+  commentaire      String?
 
   deliveryNote DeliveryNote @relation(fields: [blId], references: [id], onDelete: Cascade)
 
