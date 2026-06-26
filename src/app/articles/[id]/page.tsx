@@ -14,8 +14,6 @@ const labelStyle = {
   textTransform: 'uppercase' as const, letterSpacing: '.07em', color: '#6b7280', marginBottom: 5,
 }
 
-// ─── Composants définis HORS du parent pour éviter la perte de focus ───
-
 function Section({ icon, title, action, children }: { icon: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.05)' }}>
@@ -80,6 +78,11 @@ type SupplierPrice = {
   supplier: { id: number; code: string; name: string }
 }
 type Supplier = { id: number; code: string; name: string }
+type KitComponent = {
+  id: number; quantity: number
+  childArticle: { id: number; code: string; designationFr: string }
+}
+type ArticleSuggestion = { id: number; code: string; designationFr: string }
 
 // ─── Ligne de tarif ───
 function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) => void }) {
@@ -179,6 +182,166 @@ function AddPriceForm({ articleId, suppliers, onAdded }: { articleId: number; su
         </button>
       </div>
     </div>
+  )
+}
+
+// ─── Section Composition Kit ───
+function CompositionSection({ kitId }: { kitId: number }) {
+  const [components, setComponents] = useState<KitComponent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [search, setSearch] = useState('')
+  const [suggestions, setSuggestions] = useState<ArticleSuggestion[]>([])
+  const [selected, setSelected] = useState<ArticleSuggestion | null>(null)
+  const [qty, setQty] = useState('1')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = () => {
+    fetch(`/api/kits/${kitId}/components`)
+      .then(r => r.json())
+      .then(d => { setComponents(d); setLoading(false) })
+  }
+  useEffect(() => { load() }, [kitId])
+
+  useEffect(() => {
+    if (!search || search.length < 2) { setSuggestions([]); return }
+    const t = setTimeout(() => {
+      fetch(`/api/articles?search=${encodeURIComponent(search)}&perPage=10`)
+        .then(r => r.json())
+        .then(d => setSuggestions(d.data ?? d))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const addComponent = async () => {
+    if (!selected) { setErr('Sélectionnez un article'); return }
+    if (!qty || Number(qty) <= 0) { setErr('Quantité invalide'); return }
+    setSaving(true); setErr('')
+    const res = await fetch(`/api/kits/${kitId}/components`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childArticleId: selected.id, quantity: Number(qty) }),
+    })
+    if (!res.ok) {
+      const e = await res.json()
+      setErr(e.error ?? 'Erreur serveur')
+      setSaving(false); return
+    }
+    setSearch(''); setSelected(null); setQty('1'); setSuggestions([])
+    setShowForm(false); setSaving(false)
+    load()
+  }
+
+  const removeComponent = async (compId: number) => {
+    if (!confirm('Retirer ce composant ?')) return
+    await fetch(`/api/kits/${kitId}/components/${compId}`, { method: 'DELETE' })
+    load()
+  }
+
+  const smInput = { ...inputStyle, padding: '8px 10px', fontSize: 12 }
+
+  return (
+    <Section
+      icon="🔩"
+      title={`Composition du kit (${components.length} composant${components.length > 1 ? 's' : ''})`}
+      action={
+        <button
+          onClick={() => { setShowForm(p => !p); setErr('') }}
+          style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showForm ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}
+        >
+          {showForm ? '✕ Annuler' : '+ Ajouter un composant'}
+        </button>
+      }
+    >
+      {/* Formulaire ajout */}
+      {showForm && (
+        <div style={{ marginBottom: 20, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: '#6b7280', marginBottom: 12 }}>Ajouter un composant</p>
+          {err && <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 8 }}>⚠️ {err}</p>}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 10, alignItems: 'end' }}>
+            <div style={{ position: 'relative' }}>
+              <label style={{ ...labelStyle, fontSize: 10 }}>Article (code ou désignation) *</label>
+              <input
+                type="text"
+                value={selected ? `${selected.code} — ${selected.designationFr}` : search}
+                onChange={e => { setSearch(e.target.value); setSelected(null) }}
+                placeholder="Rechercher un article..."
+                style={smInput}
+              />
+              {suggestions.length > 0 && !selected && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,.1)', zIndex: 50, maxHeight: 200, overflowY: 'auto' }}>
+                  {suggestions.map(s => (
+                    <div
+                      key={s.id}
+                      onClick={() => { setSelected(s); setSearch(''); setSuggestions([]) }}
+                      style={{ padding: '9px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#f0fdf4')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
+                    >
+                      <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#0c4e54' }}>{s.code}</span>
+                      <span style={{ color: '#6b7280', marginLeft: 8 }}>{s.designationFr}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label style={{ ...labelStyle, fontSize: 10 }}>Quantité *</label>
+              <input
+                type="number" min="1" step="1"
+                value={qty}
+                onChange={e => setQty(e.target.value)}
+                style={smInput}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            <button
+              onClick={addComponent}
+              disabled={saving || !selected}
+              style={{ padding: '8px 20px', fontSize: 12, fontWeight: 700, background: saving || !selected ? '#9ca3af' : '#0c4e54', color: '#fff', border: 'none', borderRadius: 8, cursor: saving || !selected ? 'not-allowed' : 'pointer' }}
+            >
+              {saving ? 'Ajout…' : '+ Ajouter'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Liste composants */}
+      {loading ? (
+        <p style={{ fontSize: 13, color: '#9ca3af' }}>Chargement…</p>
+      ) : components.length === 0 ? (
+        <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Aucun composant défini pour ce kit.</p>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+              {['Code', 'Désignation', 'Quantité', ''].map(h => (
+                <th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {components.map(comp => (
+              <tr key={comp.id} style={{ borderBottom: '1px solid #f9fafb' }}>
+                <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#0c4e54' }}>{comp.childArticle.code}</td>
+                <td style={{ padding: '10px 12px', color: '#374151' }}>{comp.childArticle.designationFr}</td>
+                <td style={{ padding: '10px 12px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{comp.quantity}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                  <button
+                    onClick={() => removeComponent(comp.id)}
+                    style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
+                  >
+                    ✕ Retirer
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Section>
   )
 }
 
@@ -294,6 +457,11 @@ export default function ArticleDetailPage() {
           <>
             <button onClick={() => setEditing(true)} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #0c4e54', borderRadius: 9, color: '#0c4e54', background: '#fff', cursor: 'pointer' }}>✏️ Modifier</button>
             <button onClick={archive} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #fca5a5', borderRadius: 9, color: '#dc2626', background: '#fff', cursor: 'pointer' }}>🗄️ Archiver</button>
+            {article.type === 'KIT' && (
+              <Link href="/kits" style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #e5e7eb', borderRadius: 9, color: '#374151', background: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                📦 Voir dans Kits
+              </Link>
+            )}
           </>
         )}
       </div>
@@ -374,6 +542,9 @@ export default function ArticleDetailPage() {
             )}
           </Grid>
         </Section>
+
+        {/* ── Composition (KIT uniquement) ── */}
+        {article.type === 'KIT' && <CompositionSection kitId={article.id} />}
 
         <Section icon="💬" title="Commentaire">
           {editing
