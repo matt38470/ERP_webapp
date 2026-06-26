@@ -3,47 +3,68 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-// — Composants définis HORS du composant parent pour éviter le bug de perte de focus —
+// ─── Styles communs ───
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box' as const,
+  border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 12px',
+  fontSize: 13, color: '#111827', background: '#fff', outline: 'none', fontFamily: 'inherit',
+}
+const labelStyle = {
+  display: 'block', fontSize: 11, fontWeight: 700 as const,
+  textTransform: 'uppercase' as const, letterSpacing: '.07em', color: '#6b7280', marginBottom: 5,
+}
+
+// ─── Composants définis HORS du parent pour éviter la perte de focus ───
+
+function Section({ icon, title, action, children }: { icon: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.05)' }}>
+      <div style={{ padding: '14px 22px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16 }}>{icon}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: '#374151' }}>{title}</span>
+        </div>
+        {action}
+      </div>
+      <div style={{ padding: '20px 22px' }}>{children}</div>
+    </section>
+  )
+}
+
+function Grid({ cols = 4, children }: { cols?: number; children: React.ReactNode }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16 }}>{children}</div>
+}
 
 function ReadField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-sm text-gray-800">{value || <span className="text-gray-400">—</span>}</p>
+      <p style={labelStyle}>{label}</p>
+      <p style={{ fontSize: 13, color: '#111827', margin: 0 }}>
+        {value || <span style={{ color: '#d1d5db' }}>—</span>}
+      </p>
     </div>
   )
 }
 
-function EditField({ label, value, onChange, type = 'text' }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string
+function EditField({ label, value, onChange, type = 'text', placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string
 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
+      <label style={labelStyle}>{label}</label>
+      <input type={type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} style={inputStyle} />
     </div>
   )
 }
 
-function RFWrap({ label, value }: { label: string; value: string | null | undefined }) {
-  return <ReadField label={label} value={value} />
-}
-
-function EFWrap({ label, field, type, form, setForm }: {
-  label: string; field: string; type?: string
+function EF({ label, field, type, placeholder, form, setForm }: {
+  label: string; field: string; type?: string; placeholder?: string
   form: Record<string, string>; setForm: React.Dispatch<React.SetStateAction<Record<string, string>>>
 }) {
-  return (
-    <EditField
-      label={label}
-      type={type}
-      value={form[field] ?? ''}
-      onChange={v => setForm(p => ({ ...p, [field]: v }))}
-    />
-  )
+  return <EditField label={label} type={type} placeholder={placeholder} value={form[field] ?? ''} onChange={v => setForm(p => ({ ...p, [field]: v }))} />
 }
 
+// ─── Types ───
 type Article = {
   id: number; code: string; indice: string | null; designationFr: string; designationEn: string | null
   etat: string | null; famille: string | null; sousFamille: string | null
@@ -52,137 +73,114 @@ type Article = {
   commentaire: string | null; isActive: boolean; type: string; createdAt: string
   lots: { id: number; lotNumber: string; quantity: string; status: string; receivedAt: string | null }[]
 }
-
 type SupplierPrice = {
   id: number; supplierId: number; unitPrice: string; qtyMin: string | null
   refDevis: string | null; dateDevis: string | null; validFrom: string | null; validTo: string | null
   currency: string; note: string | null; isActive: boolean
   supplier: { id: number; code: string; name: string }
 }
-
 type Supplier = { id: number; code: string; name: string }
 
+// ─── Ligne de tarif ───
 function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) => void }) {
+  const tdStyle = { padding: '10px 12px', fontSize: 13, borderBottom: '1px solid #f9fafb' }
   return (
-    <tr className="hover:bg-gray-50">
-      <td className="py-2 pr-4 text-sm font-medium">{sp.supplier.name} <span className="text-gray-400 text-xs">({sp.supplier.code})</span></td>
-      <td className="py-2 pr-4 tabular-nums text-sm font-bold text-teal-700">{Number(sp.unitPrice).toFixed(4)} {sp.currency}</td>
-      <td className="py-2 pr-4 text-sm text-gray-600">{sp.qtyMin != null ? `≥ ${Number(sp.qtyMin)}` : '—'}</td>
-      <td className="py-2 pr-4 text-sm text-gray-600">{sp.refDevis || '—'}</td>
-      <td className="py-2 pr-4 text-sm text-gray-500">{sp.dateDevis ? new Date(sp.dateDevis).toLocaleDateString('fr-FR') : '—'}</td>
-      <td className="py-2 pr-4 text-sm text-gray-500">
+    <tr style={{ borderBottom: '1px solid #f9fafb' }}>
+      <td style={tdStyle}>
+        <span style={{ fontWeight: 600 }}>{sp.supplier.name}</span>
+        <span style={{ color: '#9ca3af', fontSize: 11, marginLeft: 6 }}>({sp.supplier.code})</span>
+      </td>
+      <td style={{ ...tdStyle, fontWeight: 700, color: '#065f46', fontVariantNumeric: 'tabular-nums' }}>
+        {Number(sp.unitPrice).toFixed(4)} {sp.currency}
+      </td>
+      <td style={{ ...tdStyle, color: '#6b7280' }}>{sp.qtyMin != null ? `≥ ${Number(sp.qtyMin)}` : '—'}</td>
+      <td style={{ ...tdStyle, color: '#6b7280' }}>{sp.refDevis || '—'}</td>
+      <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{sp.dateDevis ? new Date(sp.dateDevis).toLocaleDateString('fr-FR') : '—'}</td>
+      <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>
         {sp.validFrom ? new Date(sp.validFrom).toLocaleDateString('fr-FR') : '—'}
         {sp.validTo ? ` → ${new Date(sp.validTo).toLocaleDateString('fr-FR')}` : ''}
       </td>
-      <td className="py-2">
-        <button onClick={() => onDelete(sp.id)}
-          className="text-xs text-red-500 hover:text-red-700 hover:underline">Supprimer</button>
+      <td style={tdStyle}>
+        <button onClick={() => onDelete(sp.id)} style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}>✕ Supprimer</button>
       </td>
     </tr>
   )
 }
 
-function AddPriceForm({ articleId, suppliers, onAdded }: {
-  articleId: number; suppliers: Supplier[];
-  onAdded: (sp: SupplierPrice) => void
-}) {
-  const [form, setForm] = useState({
-    supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '',
-    validFrom: '', validTo: '', currency: 'EUR', note: '',
-  })
+// ─── Formulaire ajout tarif ───
+function AddPriceForm({ articleId, suppliers, onAdded }: { articleId: number; suppliers: Supplier[]; onAdded: (sp: SupplierPrice) => void }) {
+  const [f, setF] = useState({ supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '', validFrom: '', validTo: '', currency: 'EUR', note: '' })
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  const set = (k: string) => (v: string) => setForm(p => ({ ...p, [k]: v }))
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF(p => ({ ...p, [k]: e.target.value }))
 
   const submit = async () => {
-    if (!form.supplierId || !form.unitPrice) { setError('Fournisseur et prix obligatoires'); return }
-    setSaving(true); setError('')
-    try {
-      const res = await fetch('/api/supplier-prices', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, articleId, unitPrice: parseFloat(form.unitPrice), qtyMin: form.qtyMin ? parseFloat(form.qtyMin) : null }),
-      })
-      if (!res.ok) { setError('Erreur serveur'); return }
-      const sp = await res.json()
-      onAdded(sp)
-      setForm({ supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '', validFrom: '', validTo: '', currency: 'EUR', note: '' })
-    } catch { setError('Erreur réseau') }
+    if (!f.supplierId || !f.unitPrice) { setErr('Fournisseur et prix sont obligatoires'); return }
+    setSaving(true); setErr('')
+    const res = await fetch('/api/supplier-prices', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...f, articleId, unitPrice: parseFloat(f.unitPrice), qtyMin: f.qtyMin ? parseFloat(f.qtyMin) : null }),
+    })
+    if (!res.ok) { setErr('Erreur serveur'); setSaving(false); return }
+    const sp = await res.json()
+    onAdded(sp)
+    setF({ supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '', validFrom: '', validTo: '', currency: 'EUR', note: '' })
     setSaving(false)
   }
 
+  const smInput = { ...inputStyle, padding: '8px 10px', fontSize: 12 }
+
   return (
-    <div className="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4">
-      <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">Ajouter un tarif</h3>
-      {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div style={{ marginTop: 16, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: '#6b7280', marginBottom: 12 }}>Ajouter un tarif</p>
+      {err && <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 8 }}>⚠️ {err}</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Fournisseur *</label>
-          <select value={form.supplierId} onChange={e => set('supplierId')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600">
-            <option value="">-- choisir --</option>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Fournisseur *</label>
+          <select value={f.supplierId} onChange={set('supplierId')} style={smInput}>
+            <option value="">— choisir —</option>
             {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Prix unitaire (€) *</label>
-          <input type="number" step="0.0001" value={form.unitPrice} onChange={e => set('unitPrice')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
+          <label style={{ ...labelStyle, fontSize: 10 }}>Prix unit. *</label>
+          <input type="number" step="0.0001" value={f.unitPrice} onChange={set('unitPrice')} style={smInput} placeholder="0.0000" />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Qte min.</label>
-          <input type="number" step="1" value={form.qtyMin} onChange={e => set('qtyMin')(e.target.value)}
-            placeholder="sans limite"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
+          <label style={{ ...labelStyle, fontSize: 10 }}>Qté min.</label>
+          <input type="number" value={f.qtyMin} onChange={set('qtyMin')} style={smInput} placeholder="Sans limite" />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Devise</label>
-          <select value={form.currency} onChange={e => set('currency')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600">
-            <option value="EUR">€ EUR</option>
-            <option value="USD">$ USD</option>
-            <option value="GBP">£ GBP</option>
-            <option value="CHF">CHF</option>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Devise</label>
+          <select value={f.currency} onChange={set('currency')} style={smInput}>
+            <option value="EUR">€ EUR</option><option value="USD">$ USD</option><option value="GBP">£ GBP</option><option value="CHF">CHF</option>
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Réf. devis</label>
-          <input type="text" value={form.refDevis} onChange={e => set('refDevis')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
-        </div>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Réf. devis</label>
+          <input type="text" value={f.refDevis} onChange={set('refDevis')} style={smInput} /></div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Date devis</label>
-          <input type="date" value={form.dateDevis} onChange={e => set('dateDevis')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
-        </div>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Date devis</label>
+          <input type="date" value={f.dateDevis} onChange={set('dateDevis')} style={smInput} /></div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Valide du</label>
-          <input type="date" value={form.validFrom} onChange={e => set('validFrom')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
-        </div>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Valide du</label>
+          <input type="date" value={f.validFrom} onChange={set('validFrom')} style={smInput} /></div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">au</label>
-          <input type="date" value={form.validTo} onChange={e => set('validTo')(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
-        </div>
-        <div className="md:col-span-4">
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Note</label>
-          <input type="text" value={form.note} onChange={e => set('note')(e.target.value)}
-            placeholder="Ex: prix valable si commande groupée, réf. catalogue…"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
+          <label style={{ ...labelStyle, fontSize: 10 }}>au</label>
+          <input type="date" value={f.validTo} onChange={set('validTo')} style={smInput} /></div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={{ ...labelStyle, fontSize: 10 }}>Note</label>
+          <input type="text" value={f.note} onChange={set('note')} style={smInput} placeholder="Ex: prix valable si commande groupée…" />
         </div>
       </div>
-      <div className="flex justify-end mt-3">
-        <button onClick={submit} disabled={saving}
-          className="px-4 py-2 text-sm bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60 font-semibold">
-          {saving ? 'Ajout…' : 'Ajouter ce tarif'}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+        <button onClick={submit} disabled={saving} style={{ padding: '8px 20px', fontSize: 12, fontWeight: 700, background: '#0c4e54', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+          {saving ? 'Ajout…' : '+ Ajouter ce tarif'}
         </button>
       </div>
     </div>
   )
 }
-
-// — Page principale —
 
 function articleToForm(d: Record<string, unknown>): Record<string, string> {
   const f: Record<string, string> = {}
@@ -191,6 +189,13 @@ function articleToForm(d: Record<string, unknown>): Record<string, string> {
     else if (d[k] === null) f[k] = ''
   }
   return f
+}
+
+const LOT_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
+  AVAILABLE: { bg: '#d1fae5', color: '#065f46' },
+  RESERVED:  { bg: '#dbeafe', color: '#1e40af' },
+  QUARANTINE:{ bg: '#fef3c7', color: '#92400e' },
+  EXPIRED:   { bg: '#fee2e2', color: '#991b1b' },
 }
 
 export default function ArticleDetailPage() {
@@ -207,30 +212,12 @@ export default function ArticleDetailPage() {
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    // Article
     fetch(`/api/articles/${id}`)
-      .then(r => {
-        if (!r.ok) { setNotFound(true); return null }
-        return r.json()
-      })
-      .then(d => {
-        if (!d) return
-        setArticle(d)
-        setForm(articleToForm(d))
-      })
-      .catch(() => setLoadError('Impossible de charger l’article.'))
-
-    // Tarifs fournisseurs
-    fetch(`/api/supplier-prices?articleId=${id}`)
-      .then(r => r.ok ? r.json() : [])
-      .then(setPrices)
-      .catch(() => setPrices([]))
-
-    // Liste des fournisseurs
-    fetch('/api/fournisseurs')
-      .then(r => r.ok ? r.json() : [])
-      .then(setSuppliers)
-      .catch(() => setSuppliers([]))
+      .then(r => { if (!r.ok) { setNotFound(true); return null } return r.json() })
+      .then(d => { if (!d) return; setArticle(d); setForm(articleToForm(d)) })
+      .catch(() => setLoadError('Impossible de charger l\'article.'))
+    fetch(`/api/supplier-prices?articleId=${id}`).then(r => r.ok ? r.json() : []).then(setPrices).catch(() => setPrices([]))
+    fetch('/api/fournisseurs').then(r => r.ok ? r.json() : []).then(setSuppliers).catch(() => setSuppliers([]))
   }, [id])
 
   const save = async () => {
@@ -239,17 +226,8 @@ export default function ArticleDetailPage() {
     for (const k of ['prixAchatRef', 'stockMin', 'stockSecurite']) {
       if (body[k] === '') body[k] = null; else if (body[k]) body[k] = parseFloat(body[k] as string)
     }
-    try {
-      const res = await fetch(`/api/articles/${id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) { setSaving(false); return }
-      const updated = await res.json()
-      setArticle(updated)
-      setForm(articleToForm(updated))
-      setEditing(false)
-    } catch { /* silencieux */ }
+    const res = await fetch(`/api/articles/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (res.ok) { const u = await res.json(); setArticle(u); setForm(articleToForm(u)); setEditing(false) }
     setSaving(false)
   }
 
@@ -265,178 +243,197 @@ export default function ArticleDetailPage() {
     setPrices(p => p.filter(x => x.id !== priceId))
   }, [])
 
-  if (notFound) return (
-    <div className="p-8 text-center">
-      <p className="text-gray-500 mb-4">Article introuvable.</p>
-      <Link href="/articles" className="text-teal-700 hover:underline">Retour aux articles</Link>
-    </div>
-  )
-  if (loadError) return <div className="p-8 text-red-500">{loadError}</div>
-  if (!article) return <div className="p-8 text-gray-400">Chargement…</div>
+  if (notFound) return <div style={{ padding: 40, textAlign: 'center' }}><p style={{ color: '#9ca3af', marginBottom: 16 }}>Article introuvable.</p><Link href="/articles" style={{ color: '#0c4e54' }}>Retour aux articles</Link></div>
+  if (loadError) return <div style={{ padding: 40, color: '#ef4444' }}>{loadError}</div>
+  if (!article) return <div style={{ padding: 40, color: '#9ca3af', textAlign: 'center' }}>⏳ Chargement…</div>
+
+  const stockTotal = article.lots.filter(l => l.status === 'AVAILABLE').reduce((s, l) => s + Number(l.quantity), 0)
 
   return (
-    <main className="p-8 max-w-5xl mx-auto">
-      <div className="text-sm text-gray-500 mb-4">
-        <Link href="/articles" className="hover:underline text-teal-700">Articles</Link>
-        <span className="mx-2">›</span>
-        <span className="text-gray-800 font-semibold">{article.code}</span>
-      </div>
+    <main style={{ padding: '32px 40px', maxWidth: 1000, margin: '0 auto' }}>
 
-      <div className="flex items-start justify-between mb-6">
+      {/* Breadcrumb */}
+      <nav style={{ fontSize: 13, color: '#9ca3af', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Link href="/articles" style={{ color: '#0c4e54', textDecoration: 'none', fontWeight: 600 }}>Articles</Link>
+        <span>›</span>
+        <span style={{ color: '#374151', fontWeight: 600 }}>{article.code}</span>
+      </nav>
+
+      {/* Header article */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, gap: 16 }}>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{article.code}{article.indice ? ` (${article.indice})` : ''}</h1>
-          <p className="text-gray-600 mt-1">{article.designationFr}</p>
-          {!article.isActive && <span className="mt-2 inline-block text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Archivé</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: '#111827', margin: 0 }}>
+              {article.code}{article.indice ? <span style={{ fontSize: 16, fontWeight: 500, color: '#6b7280', marginLeft: 6 }}>({article.indice})</span> : null}
+            </h1>
+            {!article.isActive && <span style={{ fontSize: 11, background: '#f3f4f6', color: '#6b7280', padding: '2px 10px', borderRadius: 999, fontWeight: 600 }}>Archivé</span>}
+            <span style={{ fontSize: 11, background: '#dbeafe', color: '#1e40af', padding: '2px 10px', borderRadius: 999, fontWeight: 600 }}>{article.type}</span>
+            {article.typeProduit && <span style={{ fontSize: 11, background: '#f0fdf4', color: '#15803d', padding: '2px 10px', borderRadius: 999, fontWeight: 600 }}>{article.typeProduit}</span>}
+          </div>
+          <p style={{ color: '#6b7280', marginTop: 6, fontSize: 14 }}>{article.designationFr}</p>
+          {article.designationEn && <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 2 }}>{article.designationEn}</p>}
         </div>
-        <div className="flex gap-2">
-          {editing ? (
-            <>
-              <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
-              <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60">
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={() => setEditing(true)} className="px-4 py-2 text-sm border border-teal-600 text-teal-700 rounded-lg hover:bg-teal-50">Modifier</button>
-              <button onClick={archive} className="px-4 py-2 text-sm border border-red-300 text-red-600 rounded-lg hover:bg-red-50">Archiver</button>
-            </>
-          )}
+
+        {/* Stock badge */}
+        <div style={{ textAlign: 'center', background: stockTotal > 0 ? '#d1fae5' : '#fee2e2', borderRadius: 12, padding: '12px 20px', minWidth: 90, flexShrink: 0 }}>
+          <div style={{ fontSize: 26, fontWeight: 900, color: stockTotal > 0 ? '#065f46' : '#991b1b', lineHeight: 1 }}>{stockTotal.toLocaleString('fr-FR')}</div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: stockTotal > 0 ? '#059669' : '#dc2626', marginTop: 4 }}>En stock</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Identification</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {editing ? <>
-              <EFWrap label="Code" field="code" form={form} setForm={setForm} />
-              <EFWrap label="Indice" field="indice" form={form} setForm={setForm} />
-              <EFWrap label="État" field="etat" form={form} setForm={setForm} />
-              <EFWrap label="Famille" field="famille" form={form} setForm={setForm} />
-              <EFWrap label="Sous-famille" field="sousFamille" form={form} setForm={setForm} />
-            </> : <>
-              <RFWrap label="Code" value={article.code} />
-              <RFWrap label="Indice" value={article.indice} />
-              <RFWrap label="État" value={article.etat} />
-              <RFWrap label="Famille" value={article.famille} />
-              <RFWrap label="Sous-famille" value={article.sousFamille} />
-              <RFWrap label="Type produit" value={article.typeProduit} />
-            </>}
-          </div>
-        </section>
+      {/* Boutons action */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
+        {editing ? (
+          <>
+            <button onClick={() => setEditing(false)} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #d1d5db', borderRadius: 9, background: '#fff', cursor: 'pointer', color: '#374151' }}>Annuler</button>
+            <button onClick={save} disabled={saving} style={{ padding: '9px 22px', fontSize: 13, fontWeight: 700, background: saving ? '#9ca3af' : '#0c4e54', color: '#fff', border: 'none', borderRadius: 9, cursor: 'pointer' }}>
+              {saving ? '⏳ Enregistrement…' : '✅ Enregistrer'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setEditing(true)} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #0c4e54', borderRadius: 9, color: '#0c4e54', background: '#fff', cursor: 'pointer' }}>✏️ Modifier</button>
+            <button onClick={archive} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #fca5a5', borderRadius: 9, color: '#dc2626', background: '#fff', cursor: 'pointer' }}>🗄️ Archiver</button>
+          </>
+        )}
+      </div>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Désignations</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {editing ? <>
-              <EFWrap label="Désignation FR" field="designationFr" form={form} setForm={setForm} />
-              <EFWrap label="Désignation EN" field="designationEn" form={form} setForm={setForm} />
-            </> : <>
-              <RFWrap label="Désignation FR" value={article.designationFr} />
-              <RFWrap label="Désignation EN" value={article.designationEn} />
-            </>}
-          </div>
-        </section>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Caractéristiques physiques</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {editing ? <>
-              <EFWrap label="Diamètre" field="diametre" form={form} setForm={setForm} />
-              <EFWrap label="Longueur" field="longueur" form={form} setForm={setForm} />
-              <EFWrap label="Largeur" field="largeur" form={form} setForm={setForm} />
-              <EFWrap label="Autre carac." field="autreCarac" form={form} setForm={setForm} />
-            </> : <>
-              <RFWrap label="Diamètre" value={article.diametre} />
-              <RFWrap label="Longueur" value={article.longueur} />
-              <RFWrap label="Largeur" value={article.largeur} />
-              <RFWrap label="Autre carac." value={article.autreCarac} />
-            </>}
-          </div>
-        </section>
+        <Section icon="🏷️" title="Identification">
+          <Grid cols={4}>
+            {editing ? (
+              <>
+                <EF label="Code" field="code" form={form} setForm={setForm} />
+                <EF label="Indice" field="indice" form={form} setForm={setForm} />
+                <EF label="État" field="etat" form={form} setForm={setForm} />
+                <EF label="Famille" field="famille" form={form} setForm={setForm} />
+                <EF label="Sous-famille" field="sousFamille" form={form} setForm={setForm} />
+              </>
+            ) : (
+              <>
+                <ReadField label="Code" value={article.code} />
+                <ReadField label="Indice" value={article.indice} />
+                <ReadField label="État" value={article.etat} />
+                <ReadField label="Famille" value={article.famille} />
+                <ReadField label="Sous-famille" value={article.sousFamille} />
+                <ReadField label="Type produit" value={article.typeProduit} />
+              </>
+            )}
+          </Grid>
+        </Section>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Stock</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {editing ? <>
-              <EFWrap label="Stock minimum" field="stockMin" type="number" form={form} setForm={setForm} />
-              <EFWrap label="Stock sécurité" field="stockSecurite" type="number" form={form} setForm={setForm} />
-            </> : <>
-              <RFWrap label="Stock minimum" value={article.stockMin} />
-              <RFWrap label="Stock sécurité" value={article.stockSecurite} />
-            </>}
-          </div>
-        </section>
+        <Section icon="📝" title="Désignations">
+          <Grid cols={2}>
+            {editing ? (
+              <>
+                <EF label="Désignation FR" field="designationFr" form={form} setForm={setForm} />
+                <EF label="Désignation EN" field="designationEn" form={form} setForm={setForm} />
+              </>
+            ) : (
+              <>
+                <ReadField label="Désignation FR" value={article.designationFr} />
+                <ReadField label="Désignation EN" value={article.designationEn} />
+              </>
+            )}
+          </Grid>
+        </Section>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Commentaire</h2>
+        <Section icon="📐" title="Caractéristiques physiques">
+          <Grid cols={4}>
+            {editing ? (
+              <>
+                <EF label="Diamètre" field="diametre" form={form} setForm={setForm} />
+                <EF label="Longueur" field="longueur" form={form} setForm={setForm} />
+                <EF label="Largeur" field="largeur" form={form} setForm={setForm} />
+                <EF label="Autre carac." field="autreCarac" form={form} setForm={setForm} />
+              </>
+            ) : (
+              <>
+                <ReadField label="Diamètre" value={article.diametre} />
+                <ReadField label="Longueur" value={article.longueur} />
+                <ReadField label="Largeur" value={article.largeur} />
+                <ReadField label="Autre carac." value={article.autreCarac} />
+              </>
+            )}
+          </Grid>
+        </Section>
+
+        <Section icon="📦" title="Paramètres stock">
+          <Grid cols={3}>
+            {editing ? (
+              <>
+                <EF label="Stock minimum" field="stockMin" type="number" form={form} setForm={setForm} />
+                <EF label="Stock sécurité" field="stockSecurite" type="number" form={form} setForm={setForm} />
+              </>
+            ) : (
+              <>
+                <ReadField label="Stock minimum" value={article.stockMin} />
+                <ReadField label="Stock sécurité" value={article.stockSecurite} />
+              </>
+            )}
+          </Grid>
+        </Section>
+
+        <Section icon="💬" title="Commentaire">
           {editing
             ? <textarea value={form.commentaire ?? ''} rows={3}
                 onChange={e => setForm(p => ({ ...p, commentaire: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" />
-            : <p className="text-sm text-gray-700">{article.commentaire || <span className="text-gray-400">—</span>}</p>
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
+            : <p style={{ fontSize: 13, color: article.commentaire ? '#374151' : '#d1d5db', margin: 0 }}>{article.commentaire || '—'}</p>
           }
-        </section>
+        </Section>
 
         {/* Tarifs fournisseurs */}
-        <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Tarifs fournisseurs ({prices.length})</h2>
-            <button onClick={() => setShowAddPrice(p => !p)}
-              className="text-sm text-teal-700 border border-teal-600 px-3 py-1 rounded-lg hover:bg-teal-50">
-              {showAddPrice ? 'Annuler' : '+ Ajouter un tarif'}
+        <Section icon="💶" title={`Tarifs fournisseurs (${prices.length})`}
+          action={
+            <button onClick={() => setShowAddPrice(p => !p)} style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showAddPrice ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}>
+              {showAddPrice ? '✕ Annuler' : '+ Ajouter un tarif'}
             </button>
-          </div>
-
+          }>
           {prices.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead><tr className="border-b border-gray-100">
-                  {['Fournisseur', 'Prix unit.', 'Qte min', 'Réf. devis', 'Date devis', 'Validité', ''].map(h => (
-                    <th key={h} className="text-left pb-2 text-xs text-gray-500 uppercase pr-4">{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {prices.map(sp => <PriceRow key={sp.id} sp={sp} onDelete={deletePrice} />)}
-                </tbody>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    {['Fournisseur', 'Prix unit.', 'Qté min', 'Réf. devis', 'Date devis', 'Validité', ''].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>{prices.map(sp => <PriceRow key={sp.id} sp={sp} onDelete={deletePrice} />)}</tbody>
               </table>
             </div>
-          ) : (
-            <p className="text-sm text-gray-400">Aucun tarif fournisseur enregistré.</p>
-          )}
+          ) : <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Aucun tarif fournisseur enregistré.</p>}
+          {showAddPrice && <AddPriceForm articleId={article.id} suppliers={suppliers} onAdded={sp => { setPrices(p => [...p, sp]); setShowAddPrice(false) }} />}
+        </Section>
 
-          {showAddPrice && (
-            <AddPriceForm
-              articleId={article.id}
-              suppliers={suppliers}
-              onAdded={sp => { setPrices(p => [...p, sp]); setShowAddPrice(false) }}
-            />
-          )}
-        </section>
-
-        {/* Lots disponibles */}
+        {/* Lots */}
         {article.lots.length > 0 && (
-          <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Lots disponibles ({article.lots.length})</h2>
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-gray-100">
-                {['N° lot', 'Quantité', 'Statut', 'Reçu le'].map(h => (
-                  <th key={h} className="text-left pb-2 text-xs text-gray-500 uppercase">{h}</th>
-                ))}
-              </tr></thead>
-              <tbody className="divide-y divide-gray-50">
-                {article.lots.map(lot => (
-                  <tr key={lot.id}>
-                    <td className="py-2 font-mono text-xs">{lot.lotNumber}</td>
-                    <td className="py-2 tabular-nums">{Number(lot.quantity).toFixed(3)}</td>
-                    <td className="py-2"><span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{lot.status}</span></td>
-                    <td className="py-2 text-gray-500">{lot.receivedAt ? new Date(lot.receivedAt).toLocaleDateString('fr-FR') : '—'}</td>
-                  </tr>
-                ))}
+          <Section icon="🗃️" title={`Lots (${article.lots.length})`}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  {['N° lot', 'Quantité', 'Statut', 'Reçu le'].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {article.lots.map(lot => {
+                  const sc = LOT_STATUS_COLOR[lot.status] ?? { bg: '#f3f4f6', color: '#374151' }
+                  return (
+                    <tr key={lot.id} style={{ borderBottom: '1px solid #f9fafb' }}>
+                      <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{lot.lotNumber}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{Number(lot.quantity).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</td>
+                      <td style={{ padding: '10px 12px' }}><span style={{ background: sc.bg, color: sc.color, padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>{lot.status}</span></td>
+                      <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: 12 }}>{lot.receivedAt ? new Date(lot.receivedAt).toLocaleDateString('fr-FR') : '—'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
-          </section>
+          </Section>
         )}
       </div>
     </main>
