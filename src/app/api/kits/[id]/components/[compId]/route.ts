@@ -5,7 +5,7 @@ export async function DELETE(
   _req: Request,
   { params }: { params: { id: string; compId: string } }
 ) {
-  await prisma.articleKit.delete({
+  await prisma.kitComponent.delete({
     where: { id: Number(params.compId) },
   })
   return NextResponse.json({ ok: true })
