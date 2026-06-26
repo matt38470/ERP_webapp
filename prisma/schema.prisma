@@ -120,16 +120,52 @@ model Supplier {
   phone1        String?
   email1        String?
   langue        String?   @default("FR")
-  delaiHabituel Int?      // délai de livraison habituel en jours
+  delaiHabituel Int?
   isActive      Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   country        Country?        @relation(fields: [countryId], references: [id], onDelete: SetNull)
   purchaseOrders PurchaseOrder[]
-  lots           StockLot[]      // lots reçus de ce fournisseur
+  lots           StockLot[]
+  supplierPrices SupplierPrice[]
 
   @@index([countryId])
+}
+
+// ─────────────────────────────────────────────
+// TARIFS FOURNISSEUR
+// Un article peut avoir plusieurs tarifs fournisseurs (dégressif par qte, évolution dans le temps)
+// ─────────────────────────────────────────────
+
+model SupplierPrice {
+  id             Int       @id @default(autoincrement())
+  supplierId     Int
+  articleId      Int
+  // Prix unitaire pour cette tranche de quantité
+  unitPrice      Decimal   @db.Decimal(18, 4)
+  // Quantité minimale pour obtenir ce prix (null = prix de base sans condition de qte)
+  qtyMin         Decimal?  @db.Decimal(18, 3)
+  // Référence du devis fournisseur
+  refDevis       String?
+  dateDevis      DateTime?
+  // Période de validité
+  validFrom      DateTime?
+  validTo        DateTime?
+  // Devise
+  currency       String    @default("EUR")
+  // Notes libres
+  note           String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  article  Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+  @@index([articleId])
+  @@index([supplierId, articleId])
 }
 
 // ─────────────────────────────────────────────
@@ -160,33 +196,25 @@ model CustomerGroup {
 model Customer {
   id                 Int            @id @default(autoincrement())
   code               String         @unique
-  // Identité
   prenom             String?
   nom                String?
   etablissement      String?
-  // Coordonnées
   phone              String?
   email              String?
   langue             String?        @default("FR")
   numTVA             String?
-  // Adresse de livraison
   adresseLivraison   String?
   cpLivraison        String?
   villeLivraison     String?
-  // Adresse de facturation (peut être différente)
   adresseFacturation String?
   cpFacturation      String?
   villeFacturation   String?
-  // Contact BL
   contactBL          String?
   telBL              String?
-  // Contact facturation
   contactFact        String?
   telFact            String?
-  // Paramètres commerciaux
   fraisDePort        Decimal?       @db.Decimal(18, 2)
   codeTarif          String?
-  // Relations
   countryId          Int?
   groupId            Int?
   isActive           Boolean        @default(true)
@@ -203,7 +231,7 @@ model Customer {
 }
 
 // ─────────────────────────────────────────────
-// TARIFS
+// TARIFS CLIENT
 // ─────────────────────────────────────────────
 
 model PriceList {
@@ -261,34 +289,29 @@ model Article {
   etat          String?
   famille       String?
   sousFamille   String?
-  // Caractéristiques physiques (utilisées pour construire la désignation)
   diametre      String?
   longueur      String?
   largeur       String?
   autreCarac    String?
-  // Type de produit
   typeProduit   ProductType? @default(FINI)
-  // Prix de référence (le vrai coût vient des lots/achats)
   prixAchatRef  Decimal?     @db.Decimal(18, 4)
-  // Stock
   stockMin      Decimal?     @db.Decimal(18, 3)
   stockSecurite Decimal?     @db.Decimal(18, 3)
-  // Commentaire libre
   commentaire   String?
-  // Statut & type
   isActive      Boolean      @default(true)
   type          ArticleType  @default(SIMPLE)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  lots          StockLot[]
-  movements     Movement[]
-  movementLines StockMovementLine[]
-  parentKits    KitComponent[]      @relation("KitParent")
-  childKits     KitComponent[]      @relation("KitChild")
-  salesLines    SalesOrderLine[]
-  purchaseLines PurchaseOrderLine[]
-  priceItems    PriceListItem[]
+  lots           StockLot[]
+  movements      Movement[]
+  movementLines  StockMovementLine[]
+  parentKits     KitComponent[]      @relation("KitParent")
+  childKits      KitComponent[]      @relation("KitChild")
+  salesLines     SalesOrderLine[]
+  purchaseLines  PurchaseOrderLine[]
+  priceItems     PriceListItem[]
+  supplierPrices SupplierPrice[]
 
   @@index([type])
   @@index([isActive])
@@ -317,19 +340,18 @@ model KitComponent {
 // ─────────────────────────────────────────────
 
 model StockLot {
-  id            Int       @id @default(autoincrement())
-  articleId     Int
-  lotNumber     String
-  quantity      Decimal   @db.Decimal(18, 3)
-  status        LotStatus @default(AVAILABLE)
-  // Coût réel de ce lot (déterminé à la réception de la commande fournisseur)
-  coutRevient   Decimal?  @db.Decimal(18, 4)
-  supplierId    Int?
-  receivedAt    DateTime?
-  expiryDate    DateTime?
-  location      String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          Int       @id @default(autoincrement())
+  articleId   Int
+  lotNumber   String
+  quantity    Decimal   @db.Decimal(18, 3)
+  status      LotStatus @default(AVAILABLE)
+  coutRevient Decimal?  @db.Decimal(18, 4)
+  supplierId  Int?
+  receivedAt  DateTime?
+  expiryDate  DateTime?
+  location    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   article   Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
   supplier  Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
@@ -350,7 +372,7 @@ model MovementReason {
   id        Int               @id @default(autoincrement())
   code      String            @unique
   label     String
-  direction MovementDirection // ENTREE ou SORTIE
+  direction MovementDirection
   isActive  Boolean           @default(true)
 
   movements Movement[]
@@ -464,6 +486,9 @@ model PurchaseOrder {
   number              String    @unique
   supplierId          Int?
   status              DocStatus @default(DRAFT)
+  // Référence du devis fournisseur citée sur la commande
+  refDevisFournisseur String?
+  dateDevisFournisseur DateTime?
   createdAt           DateTime  @default(now())
   dateLivraisonPrevue DateTime?
   dateLivraisonReelle DateTime?
