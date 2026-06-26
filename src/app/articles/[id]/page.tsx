@@ -26,7 +26,6 @@ function EditField({ label, value, onChange, type = 'text' }: {
   )
 }
 
-// Wrappers stables définis HORS du composant — évite la recréation à chaque render
 function RFWrap({ label, value }: { label: string; value: string | null | undefined }) {
   return <ReadField label={label} value={value} />
 }
@@ -63,7 +62,6 @@ type SupplierPrice = {
 
 type Supplier = { id: number; code: string; name: string }
 
-// Ligne du tableau des tarifs fournisseurs (mode affichage)
 function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) => void }) {
   return (
     <tr className="hover:bg-gray-50">
@@ -84,7 +82,6 @@ function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) 
   )
 }
 
-// Formulaire d'ajout d'un tarif fournisseur — défini hors du parent
 function AddPriceForm({ articleId, suppliers, onAdded }: {
   articleId: number; suppliers: Supplier[];
   onAdded: (sp: SupplierPrice) => void
@@ -101,15 +98,16 @@ function AddPriceForm({ articleId, suppliers, onAdded }: {
   const submit = async () => {
     if (!form.supplierId || !form.unitPrice) { setError('Fournisseur et prix obligatoires'); return }
     setSaving(true); setError('')
-    const res = await fetch('/api/supplier-prices', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, articleId, unitPrice: parseFloat(form.unitPrice), qtyMin: form.qtyMin ? parseFloat(form.qtyMin) : null }),
-    })
-    if (res.ok) {
+    try {
+      const res = await fetch('/api/supplier-prices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, articleId, unitPrice: parseFloat(form.unitPrice), qtyMin: form.qtyMin ? parseFloat(form.qtyMin) : null }),
+      })
+      if (!res.ok) { setError('Erreur serveur'); return }
       const sp = await res.json()
       onAdded(sp)
       setForm({ supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '', validFrom: '', validTo: '', currency: 'EUR', note: '' })
-    } else setError('Erreur')
+    } catch { setError('Erreur réseau') }
     setSaving(false)
   }
 
@@ -186,29 +184,53 @@ function AddPriceForm({ articleId, suppliers, onAdded }: {
 
 // — Page principale —
 
+function articleToForm(d: Record<string, unknown>): Record<string, string> {
+  const f: Record<string, string> = {}
+  for (const k of Object.keys(d)) {
+    if (typeof d[k] === 'string' || typeof d[k] === 'number') f[k] = String(d[k] ?? '')
+    else if (d[k] === null) f[k] = ''
+  }
+  return f
+}
+
 export default function ArticleDetailPage() {
   const { id } = useParams()
   const router = useRouter()
   const [article, setArticle] = useState<Article | null>(null)
+  const [notFound, setNotFound] = useState(false)
   const [prices, setPrices] = useState<SupplierPrice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [showAddPrice, setShowAddPrice] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    fetch(`/api/articles/${id}`).then(r => r.json()).then(d => {
-      setArticle(d)
-      const f: Record<string, string> = {}
-      for (const k of Object.keys(d)) {
-        if (typeof d[k] === 'string' || typeof d[k] === 'number') f[k] = String(d[k] ?? '')
-        else if (d[k] === null) f[k] = ''
-      }
-      setForm(f)
-    })
-    fetch(`/api/supplier-prices?articleId=${id}`).then(r => r.json()).then(setPrices)
-    fetch('/api/fournisseurs').then(r => r.json()).then(setSuppliers)
+    // Article
+    fetch(`/api/articles/${id}`)
+      .then(r => {
+        if (!r.ok) { setNotFound(true); return null }
+        return r.json()
+      })
+      .then(d => {
+        if (!d) return
+        setArticle(d)
+        setForm(articleToForm(d))
+      })
+      .catch(() => setLoadError('Impossible de charger l’article.'))
+
+    // Tarifs fournisseurs
+    fetch(`/api/supplier-prices?articleId=${id}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setPrices)
+      .catch(() => setPrices([]))
+
+    // Liste des fournisseurs
+    fetch('/api/fournisseurs')
+      .then(r => r.ok ? r.json() : [])
+      .then(setSuppliers)
+      .catch(() => setSuppliers([]))
   }, [id])
 
   const save = async () => {
@@ -217,19 +239,18 @@ export default function ArticleDetailPage() {
     for (const k of ['prixAchatRef', 'stockMin', 'stockSecurite']) {
       if (body[k] === '') body[k] = null; else if (body[k]) body[k] = parseFloat(body[k] as string)
     }
-    const res = await fetch(`/api/articles/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const updated = await res.json()
-    setArticle(updated)
-    const f: Record<string, string> = {}
-    for (const k of Object.keys(updated)) {
-      if (typeof updated[k] === 'string' || typeof updated[k] === 'number') f[k] = String(updated[k] ?? '')
-      else if (updated[k] === null) f[k] = ''
-    }
-    setForm(f)
-    setEditing(false); setSaving(false)
+    try {
+      const res = await fetch(`/api/articles/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) { setSaving(false); return }
+      const updated = await res.json()
+      setArticle(updated)
+      setForm(articleToForm(updated))
+      setEditing(false)
+    } catch { /* silencieux */ }
+    setSaving(false)
   }
 
   const archive = async () => {
@@ -244,6 +265,13 @@ export default function ArticleDetailPage() {
     setPrices(p => p.filter(x => x.id !== priceId))
   }, [])
 
+  if (notFound) return (
+    <div className="p-8 text-center">
+      <p className="text-gray-500 mb-4">Article introuvable.</p>
+      <Link href="/articles" className="text-teal-700 hover:underline">Retour aux articles</Link>
+    </div>
+  )
+  if (loadError) return <div className="p-8 text-red-500">{loadError}</div>
   if (!article) return <div className="p-8 text-gray-400">Chargement…</div>
 
   return (
