@@ -26,6 +26,25 @@ function EditField({ label, value, onChange, type = 'text' }: {
   )
 }
 
+// Wrappers stables définis HORS du composant — évite la recréation à chaque render
+function RFWrap({ label, value }: { label: string; value: string | null | undefined }) {
+  return <ReadField label={label} value={value} />
+}
+
+function EFWrap({ label, field, type, form, setForm }: {
+  label: string; field: string; type?: string
+  form: Record<string, string>; setForm: React.Dispatch<React.SetStateAction<Record<string, string>>>
+}) {
+  return (
+    <EditField
+      label={label}
+      type={type}
+      value={form[field] ?? ''}
+      onChange={v => setForm(p => ({ ...p, [field]: v }))}
+    />
+  )
+}
+
 type Article = {
   id: number; code: string; indice: string | null; designationFr: string; designationEn: string | null
   etat: string | null; famille: string | null; sousFamille: string | null
@@ -181,7 +200,6 @@ export default function ArticleDetailPage() {
   useEffect(() => {
     fetch(`/api/articles/${id}`).then(r => r.json()).then(d => {
       setArticle(d)
-      // Convertir tous les champs en string pour le formulaire
       const f: Record<string, string> = {}
       for (const k of Object.keys(d)) {
         if (typeof d[k] === 'string' || typeof d[k] === 'number') f[k] = String(d[k] ?? '')
@@ -228,15 +246,6 @@ export default function ArticleDetailPage() {
 
   if (!article) return <div className="p-8 text-gray-400">Chargement…</div>
 
-  // Champ en lecture seule
-  const RF = (label: string, field: string) => <ReadField key={field} label={label} value={article[field as keyof Article] as string} />
-  // Champ éditable
-  const EF = (label: string, field: string, type = 'text') => (
-    <EditField key={field} label={label} type={type}
-      value={form[field] ?? ''}
-      onChange={v => setForm(p => ({ ...p, [field]: v }))} />
-  )
-
   return (
     <main className="p-8 max-w-5xl mx-auto">
       <div className="text-sm text-gray-500 mb-4">
@@ -273,18 +282,18 @@ export default function ArticleDetailPage() {
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Identification</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {editing ? <>
-              {EF('Code', 'code')}
-              {EF('Indice', 'indice')}
-              {EF('État', 'etat')}
-              {EF('Famille', 'famille')}
-              {EF('Sous-famille', 'sousFamille')}
+              <EFWrap label="Code" field="code" form={form} setForm={setForm} />
+              <EFWrap label="Indice" field="indice" form={form} setForm={setForm} />
+              <EFWrap label="État" field="etat" form={form} setForm={setForm} />
+              <EFWrap label="Famille" field="famille" form={form} setForm={setForm} />
+              <EFWrap label="Sous-famille" field="sousFamille" form={form} setForm={setForm} />
             </> : <>
-              {RF('Code', 'code')}
-              {RF('Indice', 'indice')}
-              {RF('État', 'etat')}
-              {RF('Famille', 'famille')}
-              {RF('Sous-famille', 'sousFamille')}
-              {RF('Type produit', 'typeProduit')}
+              <RFWrap label="Code" value={article.code} />
+              <RFWrap label="Indice" value={article.indice} />
+              <RFWrap label="État" value={article.etat} />
+              <RFWrap label="Famille" value={article.famille} />
+              <RFWrap label="Sous-famille" value={article.sousFamille} />
+              <RFWrap label="Type produit" value={article.typeProduit} />
             </>}
           </div>
         </section>
@@ -293,11 +302,11 @@ export default function ArticleDetailPage() {
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Désignations</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {editing ? <>
-              {EF('Désignation FR', 'designationFr')}
-              {EF('Désignation EN', 'designationEn')}
+              <EFWrap label="Désignation FR" field="designationFr" form={form} setForm={setForm} />
+              <EFWrap label="Désignation EN" field="designationEn" form={form} setForm={setForm} />
             </> : <>
-              {RF('Désignation FR', 'designationFr')}
-              {RF('Désignation EN', 'designationEn')}
+              <RFWrap label="Désignation FR" value={article.designationFr} />
+              <RFWrap label="Désignation EN" value={article.designationEn} />
             </>}
           </div>
         </section>
@@ -306,15 +315,15 @@ export default function ArticleDetailPage() {
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Caractéristiques physiques</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {editing ? <>
-              {EF('Diamètre', 'diametre')}
-              {EF('Longueur', 'longueur')}
-              {EF('Largeur', 'largeur')}
-              {EF('Autre carac.', 'autreCarac')}
+              <EFWrap label="Diamètre" field="diametre" form={form} setForm={setForm} />
+              <EFWrap label="Longueur" field="longueur" form={form} setForm={setForm} />
+              <EFWrap label="Largeur" field="largeur" form={form} setForm={setForm} />
+              <EFWrap label="Autre carac." field="autreCarac" form={form} setForm={setForm} />
             </> : <>
-              {RF('Diamètre', 'diametre')}
-              {RF('Longueur', 'longueur')}
-              {RF('Largeur', 'largeur')}
-              {RF('Autre carac.', 'autreCarac')}
+              <RFWrap label="Diamètre" value={article.diametre} />
+              <RFWrap label="Longueur" value={article.longueur} />
+              <RFWrap label="Largeur" value={article.largeur} />
+              <RFWrap label="Autre carac." value={article.autreCarac} />
             </>}
           </div>
         </section>
@@ -323,16 +332,15 @@ export default function ArticleDetailPage() {
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Stock</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {editing ? <>
-              {EF('Stock minimum', 'stockMin', 'number')}
-              {EF('Stock sécurité', 'stockSecurite', 'number')}
+              <EFWrap label="Stock minimum" field="stockMin" type="number" form={form} setForm={setForm} />
+              <EFWrap label="Stock sécurité" field="stockSecurite" type="number" form={form} setForm={setForm} />
             </> : <>
-              {RF('Stock minimum', 'stockMin')}
-              {RF('Stock sécurité', 'stockSecurite')}
+              <RFWrap label="Stock minimum" value={article.stockMin} />
+              <RFWrap label="Stock sécurité" value={article.stockSecurite} />
             </>}
           </div>
         </section>
 
-        {/* Section commentaire */}
         <section className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Commentaire</h2>
           {editing
