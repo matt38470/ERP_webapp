@@ -34,9 +34,14 @@ enum MovementType {
   ISSUE
   TRANSFER_IN
   TRANSFER_OUT
+  TRANSFER        // Déplacement interne (même entrepôt)
   ADJUSTMENT
   KIT_BUILD
   KIT_BREAK
+  LOAN_OUT        // Mise en prêt client
+  LOAN_IN         // Retour de prêt
+  DEMO_OUT        // Envoi en démonstration
+  DEMO_IN         // Retour de démonstration
 }
 
 enum LotStatus {
@@ -60,6 +65,15 @@ enum PriceScope {
   COUNTRY
   CUSTOMER
   CUSTOMER_GROUP
+}
+
+enum LocationType {
+  SHELF       // Étagère / rangement
+  DEMO        // Kit démonstration
+  LOAN        // Prêt chez un client
+  TRANSIT     // En cours de livraison / transit
+  QUARANTINE  // Contrôle qualité / quarantaine
+  OTHER       // Autre
 }
 
 // ─────────────────────────────────────────────
@@ -90,16 +104,27 @@ model Warehouse {
 }
 
 model Location {
-  id            Int        @id @default(autoincrement())
-  warehouseId   Int
-  code          String
-  label         String
+  id          Int          @id @default(autoincrement())
+  warehouseId Int
+  code        String
+  label       String
+  type        LocationType @default(SHELF)
+  // Pour les prêts / démos : client associé (optionnel)
+  customerId  Int?
+  // Référence libre (ex: numéro de kit démo, nom clinique…)
+  reference   String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
 
   warehouse     Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
   movementsFrom Movement[] @relation("FromLocation")
   movementsTo   Movement[] @relation("ToLocation")
+  lots          StockLot[]
 
   @@unique([warehouseId, code])
+  @@index([customerId])
+  @@index([type])
 }
 
 // ─────────────────────────────────────────────
@@ -135,26 +160,19 @@ model Supplier {
 
 // ─────────────────────────────────────────────
 // TARIFS FOURNISSEUR
-// Un article peut avoir plusieurs tarifs fournisseurs (dégressif par qte, évolution dans le temps)
 // ─────────────────────────────────────────────
 
 model SupplierPrice {
   id             Int       @id @default(autoincrement())
   supplierId     Int
   articleId      Int
-  // Prix unitaire pour cette tranche de quantité
   unitPrice      Decimal   @db.Decimal(18, 4)
-  // Quantité minimale pour obtenir ce prix (null = prix de base sans condition de qte)
   qtyMin         Decimal?  @db.Decimal(18, 3)
-  // Référence du devis fournisseur
   refDevis       String?
   dateDevis      DateTime?
-  // Période de validité
   validFrom      DateTime?
   validTo        DateTime?
-  // Devise
   currency       String    @default("EUR")
-  // Notes libres
   note           String?
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
@@ -225,6 +243,7 @@ model Customer {
   group      CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
   orders     SalesOrder[]
   priceLists PriceList[]
+  locations  Location[]
 
   @@index([countryId])
   @@index([groupId])
@@ -340,21 +359,23 @@ model KitComponent {
 // ─────────────────────────────────────────────
 
 model StockLot {
-  id          Int       @id @default(autoincrement())
+  id          Int        @id @default(autoincrement())
   articleId   Int
   lotNumber   String
-  quantity    Decimal   @db.Decimal(18, 3)
-  status      LotStatus @default(AVAILABLE)
-  coutRevient Decimal?  @db.Decimal(18, 4)
+  quantity    Decimal    @db.Decimal(18, 3)
+  status      LotStatus  @default(AVAILABLE)
+  coutRevient Decimal?   @db.Decimal(18, 4)
   supplierId  Int?
   receivedAt  DateTime?
   expiryDate  DateTime?
-  location    String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  // Emplacement structuré (remplace le String? libre)
+  locationId  Int?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   article   Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
   supplier  Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  location  Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   movements Movement[]
   lines     StockMovementLine[]
 
@@ -362,6 +383,7 @@ model StockLot {
   @@index([articleId])
   @@index([supplierId])
   @@index([status])
+  @@index([locationId])
 }
 
 // ─────────────────────────────────────────────
@@ -410,6 +432,7 @@ model Movement {
   @@index([lotId])
   @@index([movedAt])
   @@index([reasonId])
+  @@index([type])
 }
 
 model StockMovementLine {
@@ -482,17 +505,16 @@ model SalesOrderLine {
 // ─────────────────────────────────────────────
 
 model PurchaseOrder {
-  id                  Int       @id @default(autoincrement())
-  number              String    @unique
-  supplierId          Int?
-  status              DocStatus @default(DRAFT)
-  // Référence du devis fournisseur citée sur la commande
-  refDevisFournisseur String?
+  id                   Int       @id @default(autoincrement())
+  number               String    @unique
+  supplierId           Int?
+  status               DocStatus @default(DRAFT)
+  refDevisFournisseur  String?
   dateDevisFournisseur DateTime?
-  createdAt           DateTime  @default(now())
-  dateLivraisonPrevue DateTime?
-  dateLivraisonReelle DateTime?
-  commentaire         String?
+  createdAt            DateTime  @default(now())
+  dateLivraisonPrevue  DateTime?
+  dateLivraisonReelle  DateTime?
+  commentaire          String?
 
   supplier Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   lines    PurchaseOrderLine[]
