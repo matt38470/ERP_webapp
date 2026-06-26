@@ -34,7 +34,7 @@ enum MovementType {
   ISSUE
   TRANSFER_IN
   TRANSFER_OUT
-  TRANSFER        // Déplacement interne (même entrepôt)
+  TRANSFER        // Déplacement interne
   ADJUSTMENT
   KIT_BUILD
   KIT_BREAK
@@ -68,18 +68,24 @@ enum PriceScope {
 }
 
 enum LocationType {
-  SHELF       // Étagère / rangement
-  DEMO        // Kit démonstration
-  LOAN        // Prêt chez un client
-  TRANSIT     // En cours de livraison / transit
-  QUARANTINE  // Contrôle qualité / quarantaine
-  OTHER       // Autre
+  SHELF
+  DEMO
+  LOAN
+  TRANSIT
+  QUARANTINE
+  OTHER
 }
 
-enum DemoKitStatus {
-  EN_STOCK    // Kit présent en interne
-  EN_PRET     // Kit sorti chez un client
-  ARCHIVE     // Kit désactivé / hors service
+enum KitLoanType {
+  DEMO   // Kit envoyé pour démonstration
+  LOAN   // Kit prêté (retour attendu)
+  SALE   // Kit vendu (sortie définitive)
+}
+
+enum KitLoanStatus {
+  EN_COURS   // Kit sorti, pas encore revenu
+  RETOURNE   // Kit retourné
+  VENDU      // Converti en vente
 }
 
 // ─────────────────────────────────────────────
@@ -248,7 +254,7 @@ model Customer {
   orders     SalesOrder[]
   priceLists PriceList[]
   locations  Location[]
-  demoLoans  DemoKitLoan[]
+  kitLoans   KitLoan[]
 
   @@index([countryId])
   @@index([groupId])
@@ -330,13 +336,13 @@ model Article {
   lots           StockLot[]
   movements      Movement[]
   movementLines  StockMovementLine[]
-  parentKits     KitComponent[]      @relation("KitParent")
-  childKits      KitComponent[]      @relation("KitChild")
+  parentKits     KitComponent[]  @relation("KitParent")
+  childKits      KitComponent[]  @relation("KitChild")
   salesLines     SalesOrderLine[]
   purchaseLines  PurchaseOrderLine[]
   priceItems     PriceListItem[]
   supplierPrices SupplierPrice[]
-  demoKitItems   DemoKitItem[]
+  kitLoans       KitLoan[]       // prêts/démos/ventes de ce kit
 
   @@index([type])
   @@index([isActive])
@@ -344,7 +350,7 @@ model Article {
 }
 
 // ─────────────────────────────────────────────
-// KITS (composition article)
+// COMPOSITION DES KITS
 // ─────────────────────────────────────────────
 
 model KitComponent {
@@ -361,54 +367,31 @@ model KitComponent {
 }
 
 // ─────────────────────────────────────────────
-// KITS DÉMO
-// Un kit démo est un contenant physique (ex: "Kit P3", "Kit Drylab01")
-// qui regroupe des articles sortis du stock fini pour la démonstration.
-// Il peut être envoyé chez un client (prêt) et revenir en stock.
+// SUIVI PRÊTS / DÉMOS / VENTES DE KITS
+// Un KitLoan trace chaque sortie d'un article de type KIT
+// vers un client (prêt, démo, ou vente directe de kit)
 // ─────────────────────────────────────────────
 
-model DemoKit {
-  id          Int           @id @default(autoincrement())
-  code        String        @unique   // ex: "P3", "DRYLAB01"
-  label       String                  // ex: "Kit démo Plateau 3"
-  status      DemoKitStatus @default(EN_STOCK)
-  description String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+model KitLoan {
+  id         Int           @id @default(autoincrement())
+  articleId  Int           // article de type KIT
+  customerId Int
+  type       KitLoanType   // DEMO | LOAN | SALE
+  status     KitLoanStatus @default(EN_COURS)
+  sentAt     DateTime      @default(now())
+  returnedAt DateTime?     // null = toujours chez le client
+  contact    String?       // interlocuteur chez le client
+  note       String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
-  items DemoKitItem[]  // articles contenus dans ce kit
-  loans DemoKitLoan[]  // historique des prêts
-}
-
-model DemoKitItem {
-  id        Int     @id @default(autoincrement())
-  demoKitId Int
-  articleId Int
-  quantity  Decimal @db.Decimal(18, 3)
-  note      String? // ex: "remplacé le 12/06"
-
-  demoKit DemoKit @relation(fields: [demoKitId], references: [id], onDelete: Cascade)
-  article Article @relation(fields: [articleId], references: [id], onDelete: Restrict)
-
-  @@unique([demoKitId, articleId])
-  @@index([articleId])
-}
-
-model DemoKitLoan {
-  id          Int       @id @default(autoincrement())
-  demoKitId   Int
-  customerId  Int
-  sentAt      DateTime  @default(now())  // date de départ
-  returnedAt  DateTime?                  // null = toujours chez le client
-  contact     String?                    // interlocuteur chez le client
-  note        String?                    // observations libres
-  createdAt   DateTime  @default(now())
-
-  demoKit  DemoKit  @relation(fields: [demoKitId], references: [id], onDelete: Cascade)
+  article  Article  @relation(fields: [articleId], references: [id], onDelete: Restrict)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
-  @@index([demoKitId])
+  @@index([articleId])
   @@index([customerId])
+  @@index([status])
+  @@index([type])
 }
 
 // ─────────────────────────────────────────────
@@ -533,7 +516,7 @@ model SalesOrder {
   prixTotal        Decimal?  @db.Decimal(18, 2)
   commentaire      String?
 
-  customer      Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer      Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   lines         SalesOrderLine[]
   deliveryNotes DeliveryNote[]
 
