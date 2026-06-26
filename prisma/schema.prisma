@@ -7,10 +7,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
 enum ArticleType {
   SIMPLE
   KIT
   COMPONENT
+}
+
+enum ProductType {
+  FINI
+  EBAUCHE
+  MATIERE_PREMIERE
+  DEMO
+}
+
+enum MovementDirection {
+  ENTREE
+  SORTIE
 }
 
 enum MovementType {
@@ -46,6 +62,10 @@ enum PriceScope {
   CUSTOMER_GROUP
 }
 
+// ─────────────────────────────────────────────
+// UTILISATEURS
+// ─────────────────────────────────────────────
+
 model User {
   id        Int        @id @default(autoincrement())
   email     String     @unique
@@ -55,6 +75,10 @@ model User {
 
   movements Movement[]
 }
+
+// ─────────────────────────────────────────────
+// ENTREPÔTS & EMPLACEMENTS
+// ─────────────────────────────────────────────
 
 model Warehouse {
   id        Int        @id @default(autoincrement())
@@ -78,13 +102,47 @@ model Location {
   @@unique([warehouseId, code])
 }
 
+// ─────────────────────────────────────────────
+// FOURNISSEURS
+// ─────────────────────────────────────────────
+
+model Supplier {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique
+  name      String
+  address   String?
+  cp        String?
+  city      String?
+  countryId Int?
+  phone     String?
+  email     String?
+  contact1  String?
+  phone1    String?
+  email1    String?
+  langue    String?   @default("FR")
+  delaiHabituel Int?  // délai de livraison habituel en jours
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  country        Country?        @relation(fields: [countryId], references: [id], onDelete: SetNull)
+  purchaseOrders PurchaseOrder[]
+
+  @@index([countryId])
+}
+
+// ─────────────────────────────────────────────
+// PAYS / GROUPES CLIENTS / CLIENTS
+// ─────────────────────────────────────────────
+
 model Country {
   id        Int        @id @default(autoincrement())
   code      String     @unique
   name      String
   createdAt DateTime   @default(now())
 
-  customers Customer[]
+  customers  Customer[]
+  suppliers  Supplier[]
   priceLists PriceList[]
 }
 
@@ -94,46 +152,76 @@ model CustomerGroup {
   name      String
   createdAt DateTime   @default(now())
 
-  customers Customer[]
+  customers  Customer[]
   priceLists PriceList[]
 }
 
 model Customer {
-  id             Int            @id @default(autoincrement())
-  code           String         @unique
-  name           String
-  countryId      Int?
-  groupId        Int?
-  isActive       Boolean        @default(true)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                    Int            @id @default(autoincrement())
+  code                  String         @unique
+  // Identité
+  prenom                String?
+  nom                   String?
+  etablissement         String?
+  // Coordonnées
+  phone                 String?
+  email                 String?
+  langue                String?        @default("FR")
+  numTVA                String?
+  // Adresse de livraison
+  adresseLivraison      String?
+  cpLivraison           String?
+  villeLivraison        String?
+  // Adresse de facturation (peut être différente)
+  adresseFacturation    String?
+  cpFacturation         String?
+  villeFacturation      String?
+  // Contact BL
+  contactBL             String?
+  telBL                 String?
+  // Contact facturation
+  contactFact           String?
+  telFact               String?
+  // Paramètres commerciaux
+  fraisDePort           Decimal?       @db.Decimal(18, 2)
+  codeTarif             String?
+  // Relations
+  countryId             Int?
+  groupId               Int?
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  country        Country?       @relation(fields: [countryId], references: [id], onDelete: SetNull)
-  group          CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  orders         SalesOrder[]
-  priceLists     PriceList[]
+  country    Country?       @relation(fields: [countryId], references: [id], onDelete: SetNull)
+  group      CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  orders     SalesOrder[]
+  priceLists PriceList[]
 
   @@index([countryId])
   @@index([groupId])
 }
 
-model PriceList {
-  id             Int           @id @default(autoincrement())
-  code           String        @unique
-  name           String
-  scope          PriceScope    @default(GLOBAL)
-  countryId      Int?
-  customerId     Int?
-  customerGroupId Int?
-  currency       String        @default("EUR")
-  isActive       Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+// ─────────────────────────────────────────────
+// TARIFS
+// ─────────────────────────────────────────────
 
-  country        Country?      @relation(fields: [countryId], references: [id], onDelete: SetNull)
-  customer       Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerGroup  CustomerGroup? @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
-  items          PriceListItem[]
+model PriceList {
+  id              Int            @id @default(autoincrement())
+  code            String         @unique
+  name            String
+  scope           PriceScope     @default(GLOBAL)
+  countryId       Int?
+  customerId      Int?
+  customerGroupId Int?
+  currency        String         @default("EUR")
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  country       Country?       @relation(fields: [countryId], references: [id], onDelete: SetNull)
+  customer      Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerGroup CustomerGroup? @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
+  items         PriceListItem[]
 
   @@index([scope])
   @@index([countryId])
@@ -142,145 +230,215 @@ model PriceList {
 }
 
 model PriceListItem {
-  id           Int        @id @default(autoincrement())
-  priceListId  Int
-  articleId    Int
-  unitPrice    Decimal    @db.Decimal(18, 4)
-  minQty       Decimal?   @db.Decimal(18, 4)
-  validFrom    DateTime?
-  validTo      DateTime?
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
+  id          Int       @id @default(autoincrement())
+  priceListId Int
+  articleId   Int
+  unitPrice   Decimal   @db.Decimal(18, 4)
+  minQty      Decimal?  @db.Decimal(18, 4)
+  validFrom   DateTime?
+  validTo     DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
 
-  priceList    PriceList  @relation(fields: [priceListId], references: [id], onDelete: Cascade)
-  article      Article    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  article   Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
   @@unique([priceListId, articleId])
   @@index([articleId])
 }
 
-model Article {
-  id             Int               @id @default(autoincrement())
-  code           String            @unique
-  indice         String?
-  designationFr String @default("")
-  designationEn  String?
-  etat           String?
-  famille        String?
-  sousFamille    String?
-  stockMin       Decimal?          @db.Decimal(18, 3)
-  stockSecurite  Decimal?          @db.Decimal(18, 3)
-  isActive       Boolean           @default(true)
-  type           ArticleType       @default(SIMPLE)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+// ─────────────────────────────────────────────
+// ARTICLES
+// ─────────────────────────────────────────────
 
-  lots           StockLot[]
-  movements      Movement[]
-  movementLines  StockMovementLine[]
-  parentKits     KitComponent[]    @relation("KitParent")
-  childKits      KitComponent[]    @relation("KitChild")
-  salesLines     SalesOrderLine[]
-  purchaseLines  PurchaseOrderLine[]
-  priceItems     PriceListItem[]
+model Article {
+  id            Int          @id @default(autoincrement())
+  code          String       @unique
+  indice        String?
+  designationFr String       @default("")
+  designationEn String?
+  etat          String?
+  famille       String?
+  sousFamille   String?
+  // Caractéristiques physiques (utilisées pour construire la désignation)
+  diametre      String?
+  longueur      String?
+  largeur       String?
+  autreCarac    String?
+  // Type de produit
+  typeProduit   ProductType? @default(FINI)
+  // Prix de référence (le vrai coût vient des lots/achats)
+  prixAchatRef  Decimal?     @db.Decimal(18, 4)
+  // Stock
+  stockMin      Decimal?     @db.Decimal(18, 3)
+  stockSecurite Decimal?     @db.Decimal(18, 3)
+  // Commentaire libre
+  commentaire   String?
+  // Statut & type
+  isActive      Boolean      @default(true)
+  type          ArticleType  @default(SIMPLE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  lots          StockLot[]
+  movements     Movement[]
+  movementLines StockMovementLine[]
+  parentKits    KitComponent[]      @relation("KitParent")
+  childKits     KitComponent[]      @relation("KitChild")
+  salesLines    SalesOrderLine[]
+  purchaseLines PurchaseOrderLine[]
+  priceItems    PriceListItem[]
 
   @@index([type])
   @@index([isActive])
   @@index([code])
 }
 
-model StockLot {
-  id           Int        @id @default(autoincrement())
-  articleId    Int
-  lotNumber    String
-  quantity     Decimal    @db.Decimal(18, 3)
-  status       LotStatus  @default(AVAILABLE)
-  receivedAt   DateTime?
-  expiryDate   DateTime?
-  location     String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+// ─────────────────────────────────────────────
+// KITS
+// ─────────────────────────────────────────────
 
-  article      Article    @relation(fields: [articleId], references: [id], onDelete: Cascade)
-  movements    Movement[]
-  lines        StockMovementLine[]
+model KitComponent {
+  id              Int     @id @default(autoincrement())
+  parentArticleId Int
+  childArticleId  Int
+  quantity        Decimal @db.Decimal(18, 3)
+
+  parentArticle Article @relation("KitParent", fields: [parentArticleId], references: [id], onDelete: Cascade)
+  childArticle  Article @relation("KitChild", fields: [childArticleId], references: [id], onDelete: Restrict)
+
+  @@unique([parentArticleId, childArticleId])
+  @@index([childArticleId])
+}
+
+// ─────────────────────────────────────────────
+// STOCK — LOTS
+// ─────────────────────────────────────────────
+
+model StockLot {
+  id            Int       @id @default(autoincrement())
+  articleId     Int
+  lotNumber     String
+  quantity      Decimal   @db.Decimal(18, 3)
+  status        LotStatus @default(AVAILABLE)
+  // Coût réel de ce lot (déterminé à la réception de la commande fournisseur)
+  coutRevient   Decimal?  @db.Decimal(18, 4)
+  supplierId    Int?
+  receivedAt    DateTime?
+  expiryDate    DateTime?
+  location      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  article   Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  supplier  Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  movements Movement[]
+  lines     StockMovementLine[]
 
   @@unique([articleId, lotNumber])
   @@index([articleId])
   @@index([status])
 }
 
-model KitComponent {
-  id              Int      @id @default(autoincrement())
-  parentArticleId  Int
-  childArticleId   Int
-  quantity         Decimal  @db.Decimal(18, 3)
+// ─────────────────────────────────────────────
+// STOCK — MOTIFS DE MOUVEMENT
+// ─────────────────────────────────────────────
 
-  parentArticle    Article  @relation("KitParent", fields: [parentArticleId], references: [id], onDelete: Cascade)
-  childArticle     Article  @relation("KitChild", fields: [childArticleId], references: [id], onDelete: Restrict)
+model MovementReason {
+  id        Int               @id @default(autoincrement())
+  code      String            @unique
+  label     String
+  direction MovementDirection // ENTREE ou SORTIE
+  isActive  Boolean           @default(true)
 
-  @@unique([parentArticleId, childArticleId])
-  @@index([childArticleId])
+  movements Movement[]
 }
 
+// ─────────────────────────────────────────────
+// STOCK — MOUVEMENTS
+// ─────────────────────────────────────────────
+
 model Movement {
-  id             Int        @id @default(autoincrement())
-  movedAt        DateTime   @default(now())
-  type           MovementType
-  quantity       Decimal    @db.Decimal(18, 4)
-  referenceType  String
-  referenceId    String
-  note           String?
+  id              Int        @id @default(autoincrement())
+  movedAt         DateTime   @default(now())
+  direction       MovementDirection
+  type            MovementType
+  quantity        Decimal    @db.Decimal(18, 4)
+  referenceType   String
+  referenceId     String
+  note            String?
+  // Motif de mouvement (pour stats)
+  reasonId        Int?
+  itemId          Int
+  lotId           Int?
+  createdById     Int
+  fromLocationId  Int?
+  toLocationId    Int?
 
-  itemId         Int
-  lotId          Int?
-  createdById    Int
-  fromLocationId Int?
-  toLocationId   Int?
-
-  item         Article   @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  lot          StockLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
-  createdBy    User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  fromLocation Location? @relation("FromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
-  toLocation   Location? @relation("ToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+  reason       MovementReason? @relation(fields: [reasonId], references: [id], onDelete: SetNull)
+  item         Article         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  lot          StockLot?       @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  createdBy    User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  fromLocation Location?       @relation("FromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation   Location?       @relation("ToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
   lines        StockMovementLine[]
 
   @@index([itemId])
   @@index([lotId])
   @@index([movedAt])
+  @@index([reasonId])
 }
 
 model StockMovementLine {
-  id              Int                 @id @default(autoincrement())
+  id              Int                @id @default(autoincrement())
   movementId      Int
   articleId       Int
   lotId           Int?
-  quantity        Decimal             @db.Decimal(18, 3)
-  unitCost        Decimal?            @db.Decimal(18, 4)
+  quantity        Decimal            @db.Decimal(18, 3)
+  unitCost        Decimal?           @db.Decimal(18, 4)
   sourceLotNumber String?
   targetLotNumber String?
-  isKitExplosion  Boolean             @default(false)
+  isKitExplosion  Boolean            @default(false)
   parentLineId    Int?
 
-  movement        Movement            @relation(fields: [movementId], references: [id], onDelete: Cascade)
-  article         Article             @relation(fields: [articleId], references: [id], onDelete: Restrict)
-  lot             StockLot?           @relation(fields: [lotId], references: [id], onDelete: SetNull)
-  parentLine      StockMovementLine?  @relation("LineTree", fields: [parentLineId], references: [id], onDelete: SetNull)
-  children        StockMovementLine[]  @relation("LineTree")
+  movement   Movement           @relation(fields: [movementId], references: [id], onDelete: Cascade)
+  article    Article            @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  lot        StockLot?          @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  parentLine StockMovementLine? @relation("LineTree", fields: [parentLineId], references: [id], onDelete: SetNull)
+  children   StockMovementLine[] @relation("LineTree")
 
   @@index([movementId])
   @@index([articleId])
   @@index([lotId])
 }
 
-model SalesOrder {
-  id            Int             @id @default(autoincrement())
-  number        String          @unique
-  customerId    Int?
-  status        DocStatus       @default(DRAFT)
-  createdAt     DateTime        @default(now())
+// ─────────────────────────────────────────────
+// COMMANDES CLIENT
+// ─────────────────────────────────────────────
 
-  customer      Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+model SalesOrder {
+  id                 Int        @id @default(autoincrement())
+  number             String     @unique
+  customerId         Int?
+  status             DocStatus  @default(DRAFT)
+  // Référence côté client
+  referenceClient    String?
+  // Devis
+  numDevis           String?
+  // Devise
+  devise             String     @default("EUR")
+  // Délai de livraison
+  delai              String?
+  // Dates
+  createdAt          DateTime   @default(now())
+  dateFacturation    DateTime?
+  dateEncaissement   DateTime?
+  // Montant total
+  prixTotal          Decimal?   @db.Decimal(18, 2)
+  // Commentaire
+  commentaire        String?
+
+  customer      Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
   lines         SalesOrderLine[]
   deliveryNotes DeliveryNote[]
 
@@ -288,42 +446,62 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
-  id       Int        @id @default(autoincrement())
-  orderId  Int
-  itemId   Int
-  qty      Decimal    @db.Decimal(18, 4)
-  qtyDone  Decimal    @default(0) @db.Decimal(18, 4)
+  id         Int     @id @default(autoincrement())
+  orderId    Int
+  itemId     Int
+  qty        Decimal @db.Decimal(18, 4)
+  qtyDone    Decimal @default(0) @db.Decimal(18, 4)
+  // Prix unitaire négocié sur cette ligne
+  unitPrice  Decimal? @db.Decimal(18, 4)
+  prixTotal  Decimal? @db.Decimal(18, 4)
 
-  order    SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  item     Article    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item  Article    @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([itemId])
 }
 
-model PurchaseOrder {
-  id           Int               @id @default(autoincrement())
-  number       String            @unique
-  supplierName String
-  status       DocStatus         @default(DRAFT)
-  createdAt    DateTime          @default(now())
+// ─────────────────────────────────────────────
+// COMMANDES FOURNISSEUR
+// ─────────────────────────────────────────────
 
-  lines        PurchaseOrderLine[]
+model PurchaseOrder {
+  id                   Int       @id @default(autoincrement())
+  number               String    @unique
+  supplierId           Int?
+  status               DocStatus @default(DRAFT)
+  // Dates clés
+  createdAt            DateTime  @default(now())
+  dateLivraisonPrevue  DateTime?
+  dateLivraisonReelle  DateTime?
+  // Commentaire
+  commentaire          String?
+
+  supplier Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines    PurchaseOrderLine[]
+
+  @@index([supplierId])
 }
 
 model PurchaseOrderLine {
-  id       Int           @id @default(autoincrement())
-  orderId  Int
-  itemId   Int
-  qty      Decimal       @db.Decimal(18, 4)
-  qtyDone  Decimal       @default(0) @db.Decimal(18, 4)
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  itemId    Int
+  qty       Decimal @db.Decimal(18, 4)
+  qtyDone   Decimal @default(0) @db.Decimal(18, 4)
+  unitPrice Decimal? @db.Decimal(18, 4)
 
-  order    PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  item     Article       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item  Article       @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([itemId])
 }
+
+// ─────────────────────────────────────────────
+// BONS DE LIVRAISON & FACTURES
+// ─────────────────────────────────────────────
 
 model DeliveryNote {
   id        Int       @id @default(autoincrement())
@@ -332,8 +510,8 @@ model DeliveryNote {
   status    DocStatus @default(DRAFT)
   createdAt DateTime  @default(now())
 
-  order     SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  invoices  Invoice[]
+  order    SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
 
   @@index([orderId])
 }
@@ -345,6 +523,9 @@ model Invoice {
   status       DocStatus @default(DRAFT)
   amount       Decimal   @db.Decimal(18, 2)
   createdAt    DateTime  @default(now())
+  dateEcheance DateTime?
+  dateEncaissement DateTime?
+  commentaire  String?
 
   deliveryNote DeliveryNote @relation(fields: [blId], references: [id], onDelete: Cascade)
 
