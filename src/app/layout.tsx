@@ -7,15 +7,37 @@ export const metadata: Metadata = {
   description: 'Gestion de stock, lots, mouvements, commandes et documents',
 }
 
-const navLinks = [
-  { href: '/', label: '🏠 Accueil' },
-  { href: '/articles', label: '📦 Articles' },
-  { href: '/lots', label: '🗃️ Lots' },
-  { href: '/stock', label: '📊 Stock' },
-  { href: '/mouvements', label: '🔄 Mouvements' },
-  { href: '/commandes', label: '🛒 Commandes' },
-  { href: '/documents', label: '📄 Documents' },
-  { href: '/previsionnel', label: '📈 Prévisionnel' },
+const navGroups = [
+  {
+    label: 'Stock',
+    links: [
+      { href: '/',            label: '🏠 Accueil' },
+      { href: '/articles',    label: '📦 Articles' },
+      { href: '/lots',        label: '🗃️ Lots' },
+      { href: '/stock',       label: '📊 Stock' },
+      { href: '/mouvements',  label: '🔄 Mouvements' },
+    ],
+  },
+  {
+    label: 'Commercial',
+    links: [
+      { href: '/clients',     label: '👤 Clients' },
+      { href: '/commandes',   label: '🛒 Commandes' },
+      { href: '/documents',   label: '📄 BL / Factures' },
+    ],
+  },
+  {
+    label: 'Achats',
+    links: [
+      { href: '/fournisseurs',label: '🏭 Fournisseurs' },
+    ],
+  },
+  {
+    label: 'Analyse',
+    links: [
+      { href: '/previsionnel', label: '📈 Prévisionnel' },
+    ],
+  },
 ]
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -32,31 +54,39 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           padding: '24px 0',
           flexShrink: 0,
           minHeight: '100vh',
+          overflowY: 'auto',
         }}>
           <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #333' }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>⚙️ ERP V5</div>
             <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>Gestion de stock</div>
           </div>
-          <ul style={{ listStyle: 'none', padding: '16px 0', margin: 0 }}>
-            {navLinks.map(link => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  style={{
-                    display: 'block',
-                    padding: '10px 20px',
-                    color: '#ccc',
-                    textDecoration: 'none',
-                    fontSize: 14,
-                    borderRadius: 0,
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
+
+          {navGroups.map(group => (
+            <div key={group.label} style={{ marginTop: 16 }}>
+              <div style={{ padding: '4px 20px 6px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: '#555' }}>
+                {group.label}
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {group.links.map(link => (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      style={{
+                        display: 'block',
+                        padding: '9px 20px',
+                        color: '#ccc',
+                        textDecoration: 'none',
+                        fontSize: 14,
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
 
         {/* Contenu principal */}
