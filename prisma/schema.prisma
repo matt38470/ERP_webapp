@@ -34,14 +34,14 @@ enum MovementType {
   ISSUE
   TRANSFER_IN
   TRANSFER_OUT
-  TRANSFER        // Déplacement interne
+  TRANSFER
   ADJUSTMENT
   KIT_BUILD
   KIT_BREAK
-  LOAN_OUT        // Mise en prêt client
-  LOAN_IN         // Retour de prêt
-  DEMO_OUT        // Envoi en démonstration
-  DEMO_IN         // Retour de démonstration
+  LOAN_OUT
+  LOAN_IN
+  DEMO_OUT
+  DEMO_IN
 }
 
 enum LotStatus {
@@ -77,15 +77,15 @@ enum LocationType {
 }
 
 enum KitLoanType {
-  DEMO   // Kit envoyé pour démonstration
-  LOAN   // Kit prêté (retour attendu)
-  SALE   // Kit vendu (sortie définitive)
+  DEMO
+  LOAN
+  SALE
 }
 
 enum KitLoanStatus {
-  EN_COURS   // Kit sorti, pas encore revenu
-  RETOURNE   // Kit retourné
-  VENDU      // Converti en vente
+  EN_COURS
+  RETOURNE
+  VENDU
 }
 
 // ─────────────────────────────────────────────
@@ -261,7 +261,7 @@ model Customer {
 }
 
 // ─────────────────────────────────────────────
-// TARIFS CLIENT
+// TARIFS CLIENT (grilles avancées — optionnel)
 // ─────────────────────────────────────────────
 
 model PriceList {
@@ -327,6 +327,14 @@ model Article {
   prixAchatRef  Decimal?     @db.Decimal(18, 4)
   stockMin      Decimal?     @db.Decimal(18, 3)
   stockSecurite Decimal?     @db.Decimal(18, 3)
+  // ── Tarifs de vente (0 = public, 1 à 6 = grilles clients) ──
+  prix0         Decimal?     @db.Decimal(18, 4)
+  prix1         Decimal?     @db.Decimal(18, 4)
+  prix2         Decimal?     @db.Decimal(18, 4)
+  prix3         Decimal?     @db.Decimal(18, 4)
+  prix4         Decimal?     @db.Decimal(18, 4)
+  prix5         Decimal?     @db.Decimal(18, 4)
+  prix6         Decimal?     @db.Decimal(18, 4)
   commentaire   String?
   isActive      Boolean      @default(true)
   type          ArticleType  @default(SIMPLE)
@@ -342,7 +350,7 @@ model Article {
   purchaseLines  PurchaseOrderLine[]
   priceItems     PriceListItem[]
   supplierPrices SupplierPrice[]
-  kitLoans       KitLoan[]       // prêts/démos/ventes de ce kit
+  kitLoans       KitLoan[]
 
   @@index([type])
   @@index([isActive])
@@ -566,8 +574,6 @@ model PurchaseOrderLine {
   qty       Decimal  @db.Decimal(18, 4)
   qtyDone   Decimal  @default(0) @db.Decimal(18, 4)
   unitPrice Decimal? @db.Decimal(18, 4)
-  // Lot attendu renseigné à la saisie de la commande fournisseur.
-  // Repris automatiquement lors de la réception (partielle ou totale).
   lotNumber String?
 
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)

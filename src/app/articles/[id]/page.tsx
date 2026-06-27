@@ -68,6 +68,8 @@ type Article = {
   etat: string | null; famille: string | null; sousFamille: string | null
   diametre: string | null; longueur: string | null; largeur: string | null; autreCarac: string | null
   typeProduit: string | null; prixAchatRef: string | null; stockMin: string | null; stockSecurite: string | null
+  prix0: string | null; prix1: string | null; prix2: string | null; prix3: string | null
+  prix4: string | null; prix5: string | null; prix6: string | null
   commentaire: string | null; isActive: boolean; type: string; createdAt: string
   lots: { id: number; lotNumber: string; quantity: string; status: string; receivedAt: string | null }[]
 }
@@ -84,7 +86,17 @@ type KitComponent = {
 }
 type ArticleSuggestion = { id: number; code: string; designationFr: string }
 
-// ─── Ligne de tarif ───
+const TARIF_LABELS: Record<string, string> = {
+  prix0: 'Tarif 0 — Public',
+  prix1: 'Tarif 1',
+  prix2: 'Tarif 2',
+  prix3: 'Tarif 3',
+  prix4: 'Tarif 4',
+  prix5: 'Tarif 5',
+  prix6: 'Tarif 6 — Spécial',
+}
+
+// ─── Ligne de tarif fournisseur ───
 function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) => void }) {
   const tdStyle = { padding: '10px 12px', fontSize: 13, borderBottom: '1px solid #f9fafb' }
   return (
@@ -110,7 +122,7 @@ function PriceRow({ sp, onDelete }: { sp: SupplierPrice; onDelete: (id: number) 
   )
 }
 
-// ─── Formulaire ajout tarif ───
+// ─── Formulaire ajout tarif fournisseur ───
 function AddPriceForm({ articleId, suppliers, onAdded }: { articleId: number; suppliers: Supplier[]; onAdded: (sp: SupplierPrice) => void }) {
   const [f, setF] = useState({ supplierId: '', unitPrice: '', qtyMin: '', refDevis: '', dateDevis: '', validFrom: '', validTo: '', currency: 'EUR', note: '' })
   const [saving, setSaving] = useState(false)
@@ -145,36 +157,19 @@ function AddPriceForm({ articleId, suppliers, onAdded }: { articleId: number; su
             {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
           </select>
         </div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Prix unit. *</label>
-          <input type="number" step="0.0001" value={f.unitPrice} onChange={set('unitPrice')} style={smInput} placeholder="0.0000" />
-        </div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Qté min.</label>
-          <input type="number" value={f.qtyMin} onChange={set('qtyMin')} style={smInput} placeholder="Sans limite" />
-        </div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>Prix unit. *</label><input type="number" step="0.0001" value={f.unitPrice} onChange={set('unitPrice')} style={smInput} placeholder="0.0000" /></div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>Qté min.</label><input type="number" value={f.qtyMin} onChange={set('qtyMin')} style={smInput} placeholder="Sans limite" /></div>
         <div>
           <label style={{ ...labelStyle, fontSize: 10 }}>Devise</label>
           <select value={f.currency} onChange={set('currency')} style={smInput}>
             <option value="EUR">€ EUR</option><option value="USD">$ USD</option><option value="GBP">£ GBP</option><option value="CHF">CHF</option>
           </select>
         </div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Réf. devis</label>
-          <input type="text" value={f.refDevis} onChange={set('refDevis')} style={smInput} /></div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Date devis</label>
-          <input type="date" value={f.dateDevis} onChange={set('dateDevis')} style={smInput} /></div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Valide du</label>
-          <input type="date" value={f.validFrom} onChange={set('validFrom')} style={smInput} /></div>
-        <div>
-          <label style={{ ...labelStyle, fontSize: 10 }}>au</label>
-          <input type="date" value={f.validTo} onChange={set('validTo')} style={smInput} /></div>
-        <div style={{ gridColumn: '1 / -1' }}>
-          <label style={{ ...labelStyle, fontSize: 10 }}>Note</label>
-          <input type="text" value={f.note} onChange={set('note')} style={smInput} placeholder="Ex: prix valable si commande groupée…" />
-        </div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>Réf. devis</label><input type="text" value={f.refDevis} onChange={set('refDevis')} style={smInput} /></div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>Date devis</label><input type="date" value={f.dateDevis} onChange={set('dateDevis')} style={smInput} /></div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>Valide du</label><input type="date" value={f.validFrom} onChange={set('validFrom')} style={smInput} /></div>
+        <div><label style={{ ...labelStyle, fontSize: 10 }}>au</label><input type="date" value={f.validTo} onChange={set('validTo')} style={smInput} /></div>
+        <div style={{ gridColumn: '1 / -1' }}><label style={{ ...labelStyle, fontSize: 10 }}>Note</label><input type="text" value={f.note} onChange={set('note')} style={smInput} /></div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
         <button onClick={submit} disabled={saving} style={{ padding: '8px 20px', fontSize: 12, fontWeight: 700, background: '#0c4e54', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
@@ -198,18 +193,14 @@ function CompositionSection({ kitId }: { kitId: number }) {
   const [err, setErr] = useState('')
 
   const load = () => {
-    fetch(`/api/kits/${kitId}/components`)
-      .then(r => r.json())
-      .then(d => { setComponents(d); setLoading(false) })
+    fetch(`/api/kits/${kitId}/components`).then(r => r.json()).then(d => { setComponents(d); setLoading(false) })
   }
   useEffect(() => { load() }, [kitId])
 
   useEffect(() => {
     if (!search || search.length < 2) { setSuggestions([]); return }
     const t = setTimeout(() => {
-      fetch(`/api/articles?search=${encodeURIComponent(search)}&perPage=10`)
-        .then(r => r.json())
-        .then(d => setSuggestions(d.data ?? d))
+      fetch(`/api/articles?search=${encodeURIComponent(search)}&perPage=10`).then(r => r.json()).then(d => setSuggestions(d.data ?? d))
     }, 250)
     return () => clearTimeout(t)
   }, [search])
@@ -219,66 +210,36 @@ function CompositionSection({ kitId }: { kitId: number }) {
     if (!qty || Number(qty) <= 0) { setErr('Quantité invalide'); return }
     setSaving(true); setErr('')
     const res = await fetch(`/api/kits/${kitId}/components`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ childArticleId: selected.id, quantity: Number(qty) }),
     })
-    if (!res.ok) {
-      const e = await res.json()
-      setErr(e.error ?? 'Erreur serveur')
-      setSaving(false); return
-    }
-    setSearch(''); setSelected(null); setQty('1'); setSuggestions([])
-    setShowForm(false); setSaving(false)
-    load()
+    if (!res.ok) { const e = await res.json(); setErr(e.error ?? 'Erreur serveur'); setSaving(false); return }
+    setSearch(''); setSelected(null); setQty('1'); setSuggestions([]); setShowForm(false); setSaving(false); load()
   }
 
   const removeComponent = async (compId: number) => {
     if (!confirm('Retirer ce composant ?')) return
-    await fetch(`/api/kits/${kitId}/components/${compId}`, { method: 'DELETE' })
-    load()
+    await fetch(`/api/kits/${kitId}/components/${compId}`, { method: 'DELETE' }); load()
   }
 
   const smInput = { ...inputStyle, padding: '8px 10px', fontSize: 12 }
 
   return (
-    <Section
-      icon="🔩"
-      title={`Composition du kit (${components.length} composant${components.length > 1 ? 's' : ''})`}
-      action={
-        <button
-          onClick={() => { setShowForm(p => !p); setErr('') }}
-          style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showForm ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}
-        >
-          {showForm ? '✕ Annuler' : '+ Ajouter un composant'}
-        </button>
-      }
-    >
-      {/* Formulaire ajout */}
+    <Section icon="🔩" title={`Composition du kit (${components.length} composant${components.length > 1 ? 's' : ''})`}
+      action={<button onClick={() => { setShowForm(p => !p); setErr('') }} style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showForm ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}>{showForm ? '✕ Annuler' : '+ Ajouter un composant'}</button>}>
       {showForm && (
         <div style={{ marginBottom: 20, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
           <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: '#6b7280', marginBottom: 12 }}>Ajouter un composant</p>
           {err && <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 8 }}>⚠️ {err}</p>}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 10, alignItems: 'end' }}>
             <div style={{ position: 'relative' }}>
-              <label style={{ ...labelStyle, fontSize: 10 }}>Article (code ou désignation) *</label>
-              <input
-                type="text"
-                value={selected ? `${selected.code} — ${selected.designationFr}` : search}
-                onChange={e => { setSearch(e.target.value); setSelected(null) }}
-                placeholder="Rechercher un article..."
-                style={smInput}
-              />
+              <label style={{ ...labelStyle, fontSize: 10 }}>Article *</label>
+              <input type="text" value={selected ? `${selected.code} — ${selected.designationFr}` : search} onChange={e => { setSearch(e.target.value); setSelected(null) }} placeholder="Rechercher un article..." style={smInput} />
               {suggestions.length > 0 && !selected && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,.1)', zIndex: 50, maxHeight: 200, overflowY: 'auto' }}>
                   {suggestions.map(s => (
-                    <div
-                      key={s.id}
-                      onClick={() => { setSelected(s); setSearch(''); setSuggestions([]) }}
-                      style={{ padding: '9px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#f0fdf4')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
-                    >
+                    <div key={s.id} onClick={() => { setSelected(s); setSearch(''); setSuggestions([]) }} style={{ padding: '9px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#f0fdf4')} onMouseLeave={e => (e.currentTarget.style.background = '#fff')}>
                       <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#0c4e54' }}>{s.code}</span>
                       <span style={{ color: '#6b7280', marginLeft: 8 }}>{s.designationFr}</span>
                     </div>
@@ -286,59 +247,26 @@ function CompositionSection({ kitId }: { kitId: number }) {
                 </div>
               )}
             </div>
-            <div>
-              <label style={{ ...labelStyle, fontSize: 10 }}>Quantité *</label>
-              <input
-                type="number" min="1" step="1"
-                value={qty}
-                onChange={e => setQty(e.target.value)}
-                style={smInput}
-              />
-            </div>
+            <div><label style={{ ...labelStyle, fontSize: 10 }}>Quantité *</label><input type="number" min="1" step="1" value={qty} onChange={e => setQty(e.target.value)} style={smInput} /></div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button
-              onClick={addComponent}
-              disabled={saving || !selected}
-              style={{ padding: '8px 20px', fontSize: 12, fontWeight: 700, background: saving || !selected ? '#9ca3af' : '#0c4e54', color: '#fff', border: 'none', borderRadius: 8, cursor: saving || !selected ? 'not-allowed' : 'pointer' }}
-            >
-              {saving ? 'Ajout…' : '+ Ajouter'}
-            </button>
+            <button onClick={addComponent} disabled={saving || !selected} style={{ padding: '8px 20px', fontSize: 12, fontWeight: 700, background: saving || !selected ? '#9ca3af' : '#0c4e54', color: '#fff', border: 'none', borderRadius: 8, cursor: saving || !selected ? 'not-allowed' : 'pointer' }}>{saving ? 'Ajout…' : '+ Ajouter'}</button>
           </div>
         </div>
       )}
-
-      {/* Liste composants */}
-      {loading ? (
-        <p style={{ fontSize: 13, color: '#9ca3af' }}>Chargement…</p>
-      ) : components.length === 0 ? (
+      {loading ? <p style={{ fontSize: 13, color: '#9ca3af' }}>Chargement…</p> : components.length === 0 ? (
         <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Aucun composant défini pour ce kit.</p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-              {['Code', 'Désignation', 'Quantité', ''].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
-              ))}
+          <thead><tr style={{ borderBottom: '1px solid #f3f4f6' }}>{['Code', 'Désignation', 'Quantité', ''].map(h => (<th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>))}</tr></thead>
+          <tbody>{components.map(comp => (
+            <tr key={comp.id} style={{ borderBottom: '1px solid #f9fafb' }}>
+              <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#0c4e54' }}>{comp.childArticle.code}</td>
+              <td style={{ padding: '10px 12px', color: '#374151' }}>{comp.childArticle.designationFr}</td>
+              <td style={{ padding: '10px 12px', fontWeight: 700 }}>{comp.quantity}</td>
+              <td style={{ padding: '10px 12px', textAlign: 'right' }}><button onClick={() => removeComponent(comp.id)} style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>✕ Retirer</button></td>
             </tr>
-          </thead>
-          <tbody>
-            {components.map(comp => (
-              <tr key={comp.id} style={{ borderBottom: '1px solid #f9fafb' }}>
-                <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#0c4e54' }}>{comp.childArticle.code}</td>
-                <td style={{ padding: '10px 12px', color: '#374151' }}>{comp.childArticle.designationFr}</td>
-                <td style={{ padding: '10px 12px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{comp.quantity}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => removeComponent(comp.id)}
-                    style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
-                  >
-                    ✕ Retirer
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          ))}</tbody>
         </table>
       )}
     </Section>
@@ -355,10 +283,10 @@ function articleToForm(d: Record<string, unknown>): Record<string, string> {
 }
 
 const LOT_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
-  AVAILABLE: { bg: '#d1fae5', color: '#065f46' },
-  RESERVED:  { bg: '#dbeafe', color: '#1e40af' },
-  QUARANTINE:{ bg: '#fef3c7', color: '#92400e' },
-  EXPIRED:   { bg: '#fee2e2', color: '#991b1b' },
+  AVAILABLE:  { bg: '#d1fae5', color: '#065f46' },
+  RESERVED:   { bg: '#dbeafe', color: '#1e40af' },
+  QUARANTINE: { bg: '#fef3c7', color: '#92400e' },
+  EXPIRED:    { bg: '#fee2e2', color: '#991b1b' },
 }
 
 export default function ArticleDetailPage() {
@@ -386,8 +314,10 @@ export default function ArticleDetailPage() {
   const save = async () => {
     setSaving(true)
     const body: Record<string, unknown> = { ...form }
-    for (const k of ['prixAchatRef', 'stockMin', 'stockSecurite']) {
-      if (body[k] === '') body[k] = null; else if (body[k]) body[k] = parseFloat(body[k] as string)
+    // Champs numériques
+    for (const k of ['prixAchatRef', 'stockMin', 'stockSecurite', 'prix0', 'prix1', 'prix2', 'prix3', 'prix4', 'prix5', 'prix6']) {
+      if (body[k] === '') body[k] = null
+      else if (body[k]) body[k] = parseFloat(body[k] as string)
     }
     const res = await fetch(`/api/articles/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (res.ok) { const u = await res.json(); setArticle(u); setForm(articleToForm(u)); setEditing(false) }
@@ -411,18 +341,17 @@ export default function ArticleDetailPage() {
   if (!article) return <div style={{ padding: 40, color: '#9ca3af', textAlign: 'center' }}>⏳ Chargement…</div>
 
   const stockTotal = article.lots.filter(l => l.status === 'AVAILABLE').reduce((s, l) => s + Number(l.quantity), 0)
+  const prixFields = ['prix0', 'prix1', 'prix2', 'prix3', 'prix4', 'prix5', 'prix6'] as const
 
   return (
     <main style={{ padding: '32px 40px', maxWidth: 1000, margin: '0 auto' }}>
 
-      {/* Breadcrumb */}
       <nav style={{ fontSize: 13, color: '#9ca3af', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 6 }}>
         <Link href="/articles" style={{ color: '#0c4e54', textDecoration: 'none', fontWeight: 600 }}>Articles</Link>
         <span>›</span>
         <span style={{ color: '#374151', fontWeight: 600 }}>{article.code}</span>
       </nav>
 
-      {/* Header article */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, gap: 16 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -436,15 +365,12 @@ export default function ArticleDetailPage() {
           <p style={{ color: '#6b7280', marginTop: 6, fontSize: 14 }}>{article.designationFr}</p>
           {article.designationEn && <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 2 }}>{article.designationEn}</p>}
         </div>
-
-        {/* Stock badge */}
         <div style={{ textAlign: 'center', background: stockTotal > 0 ? '#d1fae5' : '#fee2e2', borderRadius: 12, padding: '12px 20px', minWidth: 90, flexShrink: 0 }}>
           <div style={{ fontSize: 26, fontWeight: 900, color: stockTotal > 0 ? '#065f46' : '#991b1b', lineHeight: 1 }}>{stockTotal.toLocaleString('fr-FR')}</div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: stockTotal > 0 ? '#059669' : '#dc2626', marginTop: 4 }}>En stock</div>
         </div>
       </div>
 
-      {/* Boutons action */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
         {editing ? (
           <>
@@ -458,9 +384,7 @@ export default function ArticleDetailPage() {
             <button onClick={() => setEditing(true)} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #0c4e54', borderRadius: 9, color: '#0c4e54', background: '#fff', cursor: 'pointer' }}>✏️ Modifier</button>
             <button onClick={archive} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #fca5a5', borderRadius: 9, color: '#dc2626', background: '#fff', cursor: 'pointer' }}>🗄️ Archiver</button>
             {article.type === 'KIT' && (
-              <Link href="/kits" style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #e5e7eb', borderRadius: 9, color: '#374151', background: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                📦 Voir dans Kits
-              </Link>
+              <Link href="/kits" style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, border: '1px solid #e5e7eb', borderRadius: 9, color: '#374151', background: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>📦 Voir dans Kits</Link>
             )}
           </>
         )}
@@ -471,107 +395,60 @@ export default function ArticleDetailPage() {
         <Section icon="🏷️" title="Identification">
           <Grid cols={4}>
             {editing ? (
-              <>
-                <EF label="Code" field="code" form={form} setForm={setForm} />
-                <EF label="Indice" field="indice" form={form} setForm={setForm} />
-                <EF label="État" field="etat" form={form} setForm={setForm} />
-                <EF label="Famille" field="famille" form={form} setForm={setForm} />
-                <EF label="Sous-famille" field="sousFamille" form={form} setForm={setForm} />
-              </>
+              <><EF label="Code" field="code" form={form} setForm={setForm} /><EF label="Indice" field="indice" form={form} setForm={setForm} /><EF label="État" field="etat" form={form} setForm={setForm} /><EF label="Famille" field="famille" form={form} setForm={setForm} /><EF label="Sous-famille" field="sousFamille" form={form} setForm={setForm} /></>
             ) : (
-              <>
-                <ReadField label="Code" value={article.code} />
-                <ReadField label="Indice" value={article.indice} />
-                <ReadField label="État" value={article.etat} />
-                <ReadField label="Famille" value={article.famille} />
-                <ReadField label="Sous-famille" value={article.sousFamille} />
-                <ReadField label="Type produit" value={article.typeProduit} />
-              </>
+              <><ReadField label="Code" value={article.code} /><ReadField label="Indice" value={article.indice} /><ReadField label="État" value={article.etat} /><ReadField label="Famille" value={article.famille} /><ReadField label="Sous-famille" value={article.sousFamille} /><ReadField label="Type produit" value={article.typeProduit} /></>
             )}
           </Grid>
         </Section>
 
         <Section icon="📝" title="Désignations">
           <Grid cols={2}>
-            {editing ? (
-              <>
-                <EF label="Désignation FR" field="designationFr" form={form} setForm={setForm} />
-                <EF label="Désignation EN" field="designationEn" form={form} setForm={setForm} />
-              </>
-            ) : (
-              <>
-                <ReadField label="Désignation FR" value={article.designationFr} />
-                <ReadField label="Désignation EN" value={article.designationEn} />
-              </>
-            )}
+            {editing ? (<><EF label="Désignation FR" field="designationFr" form={form} setForm={setForm} /><EF label="Désignation EN" field="designationEn" form={form} setForm={setForm} /></>) : (<><ReadField label="Désignation FR" value={article.designationFr} /><ReadField label="Désignation EN" value={article.designationEn} /></>)}
           </Grid>
         </Section>
 
         <Section icon="📐" title="Caractéristiques physiques">
           <Grid cols={4}>
-            {editing ? (
-              <>
-                <EF label="Diamètre" field="diametre" form={form} setForm={setForm} />
-                <EF label="Longueur" field="longueur" form={form} setForm={setForm} />
-                <EF label="Largeur" field="largeur" form={form} setForm={setForm} />
-                <EF label="Autre carac." field="autreCarac" form={form} setForm={setForm} />
-              </>
-            ) : (
-              <>
-                <ReadField label="Diamètre" value={article.diametre} />
-                <ReadField label="Longueur" value={article.longueur} />
-                <ReadField label="Largeur" value={article.largeur} />
-                <ReadField label="Autre carac." value={article.autreCarac} />
-              </>
-            )}
+            {editing ? (<><EF label="Diamètre" field="diametre" form={form} setForm={setForm} /><EF label="Longueur" field="longueur" form={form} setForm={setForm} /><EF label="Largeur" field="largeur" form={form} setForm={setForm} /><EF label="Autre carac." field="autreCarac" form={form} setForm={setForm} /></>) : (<><ReadField label="Diamètre" value={article.diametre} /><ReadField label="Longueur" value={article.longueur} /><ReadField label="Largeur" value={article.largeur} /><ReadField label="Autre carac." value={article.autreCarac} /></>)}
           </Grid>
         </Section>
 
         <Section icon="📦" title="Paramètres stock">
           <Grid cols={3}>
-            {editing ? (
-              <>
-                <EF label="Stock minimum" field="stockMin" type="number" form={form} setForm={setForm} />
-                <EF label="Stock sécurité" field="stockSecurite" type="number" form={form} setForm={setForm} />
-              </>
-            ) : (
-              <>
-                <ReadField label="Stock minimum" value={article.stockMin} />
-                <ReadField label="Stock sécurité" value={article.stockSecurite} />
-              </>
-            )}
+            {editing ? (<><EF label="Stock minimum" field="stockMin" type="number" form={form} setForm={setForm} /><EF label="Stock sécurité" field="stockSecurite" type="number" form={form} setForm={setForm} /></>) : (<><ReadField label="Stock minimum" value={article.stockMin} /><ReadField label="Stock sécurité" value={article.stockSecurite} /></>)}
           </Grid>
         </Section>
 
-        {/* ── Composition (KIT uniquement) ── */}
+        {/* ── TARIFS DE VENTE ── */}
+        <Section icon="💰" title="Tarifs de vente (prix0 → prix6)">
+          <div style={{ marginBottom: 10, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
+            ℹ️ <strong>prix0</strong> = tarif public. <strong>prix1 à prix6</strong> = tarifs clients selon le <code>codeTarif</code> attribué à chaque fiche client.
+            Le bon prix est automatiquement sélectionné lors de la saisie d&apos;une commande client.
+          </div>
+          <Grid cols={4}>
+            {prixFields.map(field => (
+              editing
+                ? <EF key={field} label={TARIF_LABELS[field]} field={field} type="number" placeholder="0.0000" form={form} setForm={setForm} />
+                : <ReadField key={field} label={TARIF_LABELS[field]} value={article[field] ? `${Number(article[field]).toFixed(4)} €` : undefined} />
+            ))}
+          </Grid>
+        </Section>
+
         {article.type === 'KIT' && <CompositionSection kitId={article.id} />}
 
         <Section icon="💬" title="Commentaire">
           {editing
-            ? <textarea value={form.commentaire ?? ''} rows={3}
-                onChange={e => setForm(p => ({ ...p, commentaire: e.target.value }))}
-                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
-            : <p style={{ fontSize: 13, color: article.commentaire ? '#374151' : '#d1d5db', margin: 0 }}>{article.commentaire || '—'}</p>
-          }
+            ? <textarea value={form.commentaire ?? ''} rows={3} onChange={e => setForm(p => ({ ...p, commentaire: e.target.value }))} style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
+            : <p style={{ fontSize: 13, color: article.commentaire ? '#374151' : '#d1d5db', margin: 0 }}>{article.commentaire || '—'}</p>}
         </Section>
 
-        {/* Tarifs fournisseurs */}
         <Section icon="💶" title={`Tarifs fournisseurs (${prices.length})`}
-          action={
-            <button onClick={() => setShowAddPrice(p => !p)} style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showAddPrice ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}>
-              {showAddPrice ? '✕ Annuler' : '+ Ajouter un tarif'}
-            </button>
-          }>
+          action={<button onClick={() => setShowAddPrice(p => !p)} style={{ fontSize: 12, fontWeight: 600, border: '1px solid #0c4e54', color: '#0c4e54', background: showAddPrice ? '#f0fdf4' : '#fff', padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }}>{showAddPrice ? '✕ Annuler' : '+ Ajouter un tarif'}</button>}>
           {prices.length > 0 ? (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    {['Fournisseur', 'Prix unit.', 'Qté min', 'Réf. devis', 'Date devis', 'Validité', ''].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '6px 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
+                <thead><tr style={{ borderBottom: '1px solid #f3f4f6' }}>{['Fournisseur', 'Prix unit.', 'Qté min', 'Réf. devis', 'Date devis', 'Validité', ''].map(h => (<th key={h} style={{ textAlign: 'left', padding: '6px 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>))}</tr></thead>
                 <tbody>{prices.map(sp => <PriceRow key={sp.id} sp={sp} onDelete={deletePrice} />)}</tbody>
               </table>
             </div>
@@ -579,17 +456,10 @@ export default function ArticleDetailPage() {
           {showAddPrice && <AddPriceForm articleId={article.id} suppliers={suppliers} onAdded={sp => { setPrices(p => [...p, sp]); setShowAddPrice(false) }} />}
         </Section>
 
-        {/* Lots */}
         {article.lots.length > 0 && (
           <Section icon="🗃️" title={`Lots (${article.lots.length})`}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                  {['N° lot', 'Quantité', 'Statut', 'Reçu le'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
+              <thead><tr style={{ borderBottom: '1px solid #f3f4f6' }}>{['N° lot', 'Quantité', 'Statut', 'Reçu le'].map(h => (<th key={h} style={{ textAlign: 'left', padding: '0 12px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9ca3af' }}>{h}</th>))}</tr></thead>
               <tbody>
                 {article.lots.map(lot => {
                   const sc = LOT_STATUS_COLOR[lot.status] ?? { bg: '#f3f4f6', color: '#374151' }
