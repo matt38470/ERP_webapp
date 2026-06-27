@@ -1,472 +1,550 @@
 /**
- * Script d'import Excel → PostgreSQL via Prisma
- * Source : Gestion_stock.xlsx
- * Schéma  : matt38470/ERP_webapp (schema.prisma)
+ * import_excel.ts
+ * ----------------
+ * Importe les données depuis Gestion_stock.xlsx vers la base PostgreSQL via Prisma.
  *
- * Ordre d'import :
- *  1. Supplier        (onglet Fournisseur)
- *  2. Article         (onglet Article_stock)
- *  3. Customer        (onglet Client)
- *  4. Mouvement       (onglet Mouvement  → Movement + StockMovementLine par ligne)
- *  5. SalesOrder      (onglet Vente      → SalesOrder + SalesOrderLine)
- *  6. PurchaseOrder   (onglet Commande_F → PurchaseOrder + PurchaseOrderLine)
+ * Feuilles traitées :
+ *   - Fournisseurs
+ *   - Articles
+ *   - Clients
+ *   - Stock (lots + mouvements d'entrée initiaux)
+ *   - Commandes fournisseur  (avec lot par ligne → PurchaseOrderLine.lotNumber)
+ *   - Commandes client
  *
- * Usage : npx ts-node scripts/import_excel.ts
- * Deps  : npm install xlsx
+ * Règles métier :
+ *   - Réception partielle possible : qtyDone < qty → statut PARTIALLY_DELIVERED, commande reste ouverte
+ *   - Le lotNumber est renseigné sur chaque ligne de commande fournisseur
+ *     et sera pré-rempli dans le formulaire de réception
+ *
+ * Usage :
+ *   npx ts-node scripts/import_excel.ts
  */
 
-// xlsx est un module CommonJS — on l'importe via createRequire pour compatibilité ESM
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const XLSX = require("xlsx") as typeof import("xlsx");
-
-import { PrismaClient, MovementDirection, MovementType } from "@prisma/client";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as XLSX from 'xlsx';
+import * as path from 'path';
+import { PrismaClient, DocStatus, MovementDirection, MovementType } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const FILE = path.resolve(__dirname, '..', 'Gestion_stock.xlsx');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const FILE = path.join(__dirname, "..", "Gestion_stock.xlsx");
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function readSheet(wb: import("xlsx").WorkBook, name: string, headerRow = 5) {
+function readSheet(wb: XLSX.WorkBook, name: string): Record<string, unknown>[] {
   const ws = wb.Sheets[name];
-  if (!ws) throw new Error(`Onglet "${name}" introuvable`);
-  return XLSX.utils.sheet_to_json<Record<string, any>>(ws, {
-    range: headerRow - 1,
-    defval: null,
-    raw: true,
-  });
+  if (!ws) { console.warn(`⚠  Feuille "${name}" introuvable — ignorée`); return []; }
+  return XLSX.utils.sheet_to_json(ws, { defval: null });
 }
 
-function str(v: any): string | null {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim();
-  return s === "" ? null : s;
+function str(v: unknown): string | null {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  return String(v).trim();
 }
 
-function dec(v: any): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  const n = parseFloat(String(v).replace(",", "."));
+function num(v: unknown): number | null {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  const n = Number(String(v).replace(',', '.'));
   return isNaN(n) ? null : n;
 }
 
-function xDate(v: any): Date | null {
+function excelDate(v: unknown): Date | null {
   if (!v) return null;
   if (v instanceof Date) return v;
-  if (typeof v === "number") {
-    return new Date(Math.round((v - 25569) * 86400 * 1000));
-  }
+  const n = Number(v);
+  if (!isNaN(n) && n > 1000) return XLSX.SSF.parse_date_code(n) ? new Date((n - 25569) * 86400000) : null;
   const d = new Date(String(v));
   return isNaN(d.getTime()) ? null : d;
 }
 
-function toMovementType(raw: string | null): MovementType {
-  const s = (raw ?? "").toLowerCase();
-  if (s.includes("entrée") || s.includes("entree")) return MovementType.RECEIPT;
-  if (s.includes("retour prêt")) return MovementType.LOAN_IN;
-  if (s.includes("sortie")) return MovementType.ISSUE;
-  if (s.includes("prêt")) return MovementType.LOAN_OUT;
-  if (s.includes("demo") || s.includes("démo")) return MovementType.DEMO_OUT;
-  if (s.includes("transfer")) return MovementType.TRANSFER;
-  return MovementType.ADJUSTMENT;
+/** Calcule le statut d'une commande selon les lignes */
+function computeDocStatus(lines: { qty: number; qtyDone: number }[]): DocStatus {
+  if (lines.length === 0) return 'CONFIRMED';
+  const totalQty = lines.reduce((s, l) => s + l.qty, 0);
+  const totalDone = lines.reduce((s, l) => s + l.qtyDone, 0);
+  if (totalDone === 0) return 'CONFIRMED';
+  if (totalDone >= totalQty) return 'DELIVERED';
+  return 'PARTIALLY_DELIVERED'; // commande reste ouverte
 }
 
-function toDirection(type: MovementType): MovementDirection {
-  const sortie: MovementType[] = [
-    MovementType.ISSUE,
-    MovementType.LOAN_OUT,
-    MovementType.DEMO_OUT,
-    MovementType.TRANSFER_OUT,
-  ];
-  return sortie.includes(type)
-    ? MovementDirection.SORTIE
-    : MovementDirection.ENTREE;
+// ─── Utilisateur système (requis pour Movement.createdById) ──────────────────
+
+async function ensureSystemUser(): Promise<number> {
+  const user = await prisma.user.upsert({
+    where: { email: 'system@import' },
+    update: {},
+    create: { email: 'system@import', name: 'Import Excel', role: 'admin' },
+  });
+  return user.id;
 }
 
-// ── 1. FOURNISSEURS ───────────────────────────────────────────────────────────
+// ─── 1. FOURNISSEURS ─────────────────────────────────────────────────────────
 
-async function importFournisseurs(wb: import("xlsx").WorkBook) {
-  console.log("\n📦  Fournisseurs...");
-  const rows = readSheet(wb, "Fournisseur");
+async function importFournisseurs(rows: Record<string, unknown>[]) {
+  console.log(`\n📦 Fournisseurs : ${rows.length} lignes`);
   let ok = 0, skip = 0;
 
   for (const r of rows) {
-    const code = str(r["Code fournisseur"]);
-    if (!code) { skip++; continue; }
+    const code = str(r['Code'] ?? r['CODE'] ?? r['code']);
+    const name = str(r['Nom'] ?? r['NOM'] ?? r['Raison sociale'] ?? r['name']);
+    if (!code || !name) { skip++; continue; }
 
-    const paysRaw = str(r["Pays"]);
-    let countryId: number | undefined;
+    // Résolution pays
+    let countryId: number | null = null;
+    const paysRaw = str(r['Pays'] ?? r['PAYS'] ?? r['pays']);
     if (paysRaw) {
-      const pays = await prisma.country.findFirst({
-        where: { name: { contains: paysRaw, mode: "insensitive" } },
+      const country = await prisma.country.findFirst({
+        where: { OR: [{ name: { contains: paysRaw, mode: 'insensitive' } }, { code: paysRaw.toUpperCase() }] },
       });
-      countryId = pays?.id;
+      countryId = country?.id ?? null;
     }
 
     await prisma.supplier.upsert({
       where: { code },
-      update: {},
+      update: {
+        name,
+        address:       str(r['Adresse'] ?? r['adresse']),
+        cp:            str(r['CP'] ?? r['cp']),
+        city:          str(r['Ville'] ?? r['ville']),
+        countryId,
+        phone:         str(r['Téléphone'] ?? r['Tel'] ?? r['tel']),
+        email:         str(r['Email'] ?? r['email']),
+        contact1:      str(r['Contact'] ?? r['contact']),
+        phone1:        str(r['Tel contact'] ?? r['Tel1']),
+        email1:        str(r['Email contact'] ?? r['Email1']),
+        langue:        str(r['Langue'] ?? r['langue']) ?? 'FR',
+        delaiHabituel: num(r['Délai'] ?? r['delai']) ? Math.round(num(r['Délai'] ?? r['delai'])!) : null,
+      },
       create: {
         code,
-        name: str(r["Nom"]) ?? code,
-        address: str(r["Adresse"]),
-        cp: str(r["CP"]),
-        city: str(r["Ville"]),
-        phone: str(r["Téléphone"]),
-        email: str(r["Email"]),
-        contact1: str(r["Contact 1"]),
-        phone1: str(r["Téléphone1"]),
-        email1: str(r["email2"]),
-        langue: str(r["Langue"]) ?? "FR",
+        name,
+        address:       str(r['Adresse'] ?? r['adresse']),
+        cp:            str(r['CP'] ?? r['cp']),
+        city:          str(r['Ville'] ?? r['ville']),
         countryId,
+        phone:         str(r['Téléphone'] ?? r['Tel'] ?? r['tel']),
+        email:         str(r['Email'] ?? r['email']),
+        contact1:      str(r['Contact'] ?? r['contact']),
+        phone1:        str(r['Tel contact'] ?? r['Tel1']),
+        email1:        str(r['Email contact'] ?? r['Email1']),
+        langue:        str(r['Langue'] ?? r['langue']) ?? 'FR',
+        delaiHabituel: num(r['Délai'] ?? r['delai']) ? Math.round(num(r['Délai'] ?? r['delai'])!) : null,
       },
     });
     ok++;
   }
-  console.log(`  ✔ ${ok} fournisseurs, ${skip} ignorés`);
+  console.log(`   ✅ ${ok} importés, ${skip} ignorés (code ou nom manquant)`);
 }
 
-// ── 2. ARTICLES ───────────────────────────────────────────────────────────────
+// ─── 2. ARTICLES ─────────────────────────────────────────────────────────────
 
-async function importArticles(wb: import("xlsx").WorkBook) {
-  console.log("\n🔩  Articles...");
-  const rows = readSheet(wb, "Article_stock");
+async function importArticles(rows: Record<string, unknown>[]) {
+  console.log(`\n🔩 Articles : ${rows.length} lignes`);
   let ok = 0, skip = 0;
 
   for (const r of rows) {
-    const code = str(r["Code"]);
-    const designation = str(r["Désignation FR"]);
-    if (!code || !designation) { skip++; continue; }
+    const code = str(r['Code'] ?? r['CODE'] ?? r['Référence'] ?? r['ref']);
+    if (!code) { skip++; continue; }
+
+    const designationFr = str(r['Désignation'] ?? r['designation'] ?? r['DesignationFR'] ?? r['Designation FR']) ?? '';
 
     await prisma.article.upsert({
       where: { code },
-      update: {},
+      update: {
+        indice:        str(r['Indice'] ?? r['indice']),
+        designationFr,
+        designationEn: str(r['Désignation EN'] ?? r['DesignationEN'] ?? r['Designation EN']),
+        etat:          str(r['Etat'] ?? r['État'] ?? r['etat']),
+        famille:       str(r['Famille'] ?? r['famille']),
+        sousFamille:   str(r['Sous-famille'] ?? r['SousFamille'] ?? r['sous_famille']),
+        diametre:      str(r['Diamètre'] ?? r['Diametre'] ?? r['diam']),
+        longueur:      str(r['Longueur'] ?? r['longueur']),
+        largeur:       str(r['Largeur'] ?? r['largeur']),
+        autreCarac:    str(r['Autre carac'] ?? r['AutreCarac'] ?? r['autres']),
+        prixAchatRef:  num(r['Prix achat'] ?? r['PrixAchat'] ?? r['prix_achat']),
+        stockMin:      num(r['Stock min'] ?? r['StockMin'] ?? r['stock_min']),
+        stockSecurite: num(r['Stock sécu'] ?? r['StockSecu'] ?? r['stock_securite']),
+        commentaire:   str(r['Commentaire'] ?? r['commentaire']),
+      },
       create: {
         code,
-        indice: str(r["Indice"]),
-        designationFr: designation,
-        etat: str(r["Etat"]),
-        prixAchatRef: dec(r["Prix achat  unitaire"]),
-        stockMin: dec(r["Stock Min"]),
-        stockSecurite: dec(r["Stock Sécurité"]),
+        indice:        str(r['Indice'] ?? r['indice']),
+        designationFr,
+        designationEn: str(r['Désignation EN'] ?? r['DesignationEN'] ?? r['Designation EN']),
+        etat:          str(r['Etat'] ?? r['État'] ?? r['etat']),
+        famille:       str(r['Famille'] ?? r['famille']),
+        sousFamille:   str(r['Sous-famille'] ?? r['SousFamille'] ?? r['sous_famille']),
+        diametre:      str(r['Diamètre'] ?? r['Diametre'] ?? r['diam']),
+        longueur:      str(r['Longueur'] ?? r['longueur']),
+        largeur:       str(r['Largeur'] ?? r['largeur']),
+        autreCarac:    str(r['Autre carac'] ?? r['AutreCarac'] ?? r['autres']),
+        prixAchatRef:  num(r['Prix achat'] ?? r['PrixAchat'] ?? r['prix_achat']),
+        stockMin:      num(r['Stock min'] ?? r['StockMin'] ?? r['stock_min']),
+        stockSecurite: num(r['Stock sécu'] ?? r['StockSecu'] ?? r['stock_securite']),
+        commentaire:   str(r['Commentaire'] ?? r['commentaire']),
       },
     });
     ok++;
   }
-  console.log(`  ✔ ${ok} articles, ${skip} ignorés`);
+  console.log(`   ✅ ${ok} importés, ${skip} ignorés`);
 }
 
-// ── 3. CLIENTS ────────────────────────────────────────────────────────────────
+// ─── 3. CLIENTS ──────────────────────────────────────────────────────────────
 
-async function importClients(wb: import("xlsx").WorkBook) {
-  console.log("\n👤  Clients...");
-  const rows = readSheet(wb, "Client");
+async function importClients(rows: Record<string, unknown>[]) {
+  console.log(`\n👤 Clients : ${rows.length} lignes`);
   let ok = 0, skip = 0;
 
   for (const r of rows) {
-    const code = str(r["Code Client"]);
+    const code = str(r['Code'] ?? r['CODE'] ?? r['code']);
     if (!code) { skip++; continue; }
 
-    const paysRaw = str(r["PAYS"]);
-    let countryId: number | undefined;
+    let countryId: number | null = null;
+    const paysRaw = str(r['Pays'] ?? r['pays'] ?? r['PAYS']);
     if (paysRaw) {
-      const pays = await prisma.country.findFirst({
-        where: { name: { contains: paysRaw, mode: "insensitive" } },
+      const country = await prisma.country.findFirst({
+        where: { OR: [{ name: { contains: paysRaw, mode: 'insensitive' } }, { code: paysRaw.toUpperCase() }] },
       });
-      countryId = pays?.id;
+      countryId = country?.id ?? null;
     }
 
     await prisma.customer.upsert({
       where: { code },
-      update: {},
+      update: {
+        prenom:             str(r['Prénom'] ?? r['prenom']),
+        nom:                str(r['Nom'] ?? r['nom']),
+        etablissement:      str(r['Etablissement'] ?? r['etablissement'] ?? r['Société']),
+        phone:              str(r['Téléphone'] ?? r['Tel'] ?? r['tel']),
+        email:              str(r['Email'] ?? r['email']),
+        langue:             str(r['Langue'] ?? r['langue']) ?? 'FR',
+        numTVA:             str(r['N° TVA'] ?? r['numTVA'] ?? r['TVA']),
+        adresseLivraison:   str(r['Adresse livraison'] ?? r['AdresseLiv']),
+        cpLivraison:        str(r['CP livraison'] ?? r['CPLiv'] ?? r['cp_livraison']),
+        villeLivraison:     str(r['Ville livraison'] ?? r['VilleLiv']),
+        adresseFacturation: str(r['Adresse facturation'] ?? r['AdresseFact']),
+        cpFacturation:      str(r['CP facturation'] ?? r['CPFact']),
+        villeFacturation:   str(r['Ville facturation'] ?? r['VilleFact']),
+        contactBL:          str(r['Contact BL'] ?? r['contactBL']),
+        telBL:              str(r['Tel BL'] ?? r['telBL']),
+        contactFact:        str(r['Contact fact'] ?? r['contactFact']),
+        telFact:            str(r['Tel fact'] ?? r['telFact']),
+        fraisDePort:        num(r['Frais de port'] ?? r['FDP'] ?? r['fraisDePort']),
+        codeTarif:          str(r['Code tarif'] ?? r['codeTarif'] ?? r['Tarif']),
+        countryId,
+      },
       create: {
         code,
-        prenom: str(r["Prénom"]),
-        nom: str(r["NOM"]),
-        etablissement: str(r["Etablissement"]),
-        phone: str(r["TEL"]),
-        email: str(r["EMAIL"]),
-        langue: str(r["Langue"]) ?? "FR",
-        numTVA: str(r["Num TVA"]),
-        adresseLivraison: str(r["Adresse de Livraison"]),
-        cpLivraison: str(r["CP"]),
-        villeLivraison: str(r["VILLE"]),
-        adresseFacturation: str(r["Adresse de Facturation"]),
-        contactBL: str(r["Contact BL"]),
-        telBL: str(r["Tel BL"]),
-        contactFact: str(r["Contact FACT"]),
-        telFact: str(r["Tel FACT"]),
-        fraisDePort: dec(r["Frais de port"]),
-        codeTarif: str(r["Code Tarif"]),
+        prenom:             str(r['Prénom'] ?? r['prenom']),
+        nom:                str(r['Nom'] ?? r['nom']),
+        etablissement:      str(r['Etablissement'] ?? r['etablissement'] ?? r['Société']),
+        phone:              str(r['Téléphone'] ?? r['Tel'] ?? r['tel']),
+        email:              str(r['Email'] ?? r['email']),
+        langue:             str(r['Langue'] ?? r['langue']) ?? 'FR',
+        numTVA:             str(r['N° TVA'] ?? r['numTVA'] ?? r['TVA']),
+        adresseLivraison:   str(r['Adresse livraison'] ?? r['AdresseLiv']),
+        cpLivraison:        str(r['CP livraison'] ?? r['CPLiv'] ?? r['cp_livraison']),
+        villeLivraison:     str(r['Ville livraison'] ?? r['VilleLiv']),
+        adresseFacturation: str(r['Adresse facturation'] ?? r['AdresseFact']),
+        cpFacturation:      str(r['CP facturation'] ?? r['CPFact']),
+        villeFacturation:   str(r['Ville facturation'] ?? r['VilleFact']),
+        contactBL:          str(r['Contact BL'] ?? r['contactBL']),
+        telBL:              str(r['Tel BL'] ?? r['telBL']),
+        contactFact:        str(r['Contact fact'] ?? r['contactFact']),
+        telFact:            str(r['Tel fact'] ?? r['telFact']),
+        fraisDePort:        num(r['Frais de port'] ?? r['FDP'] ?? r['fraisDePort']),
+        codeTarif:          str(r['Code tarif'] ?? r['codeTarif'] ?? r['Tarif']),
         countryId,
       },
     });
     ok++;
   }
-  console.log(`  ✔ ${ok} clients, ${skip} ignorés`);
+  console.log(`   ✅ ${ok} importés, ${skip} ignorés`);
 }
 
-// ── 4. MOUVEMENTS ─────────────────────────────────────────────────────────────
+// ─── 4. STOCK (lots + mouvements initiaux) ───────────────────────────────────
 
-async function importMouvements(wb: import("xlsx").WorkBook) {
-  console.log("\n🔄  Mouvements...");
-  const rows = readSheet(wb, "Mouvement");
+async function importStock(rows: Record<string, unknown>[], systemUserId: number) {
+  console.log(`\n📊 Stock : ${rows.length} lignes`);
+  let ok = 0, skip = 0;
 
-  const importUser = await prisma.user.upsert({
-    where: { email: "import@system.local" },
-    update: {},
-    create: { email: "import@system.local", name: "Import Excel", role: "admin" },
-  });
-
-  let ok = 0, skip = 0, err = 0;
+  // Entrepôt par défaut
+  let warehouse = await prisma.warehouse.findFirst({ where: { code: 'PRINCIPAL' } });
+  if (!warehouse) {
+    warehouse = await prisma.warehouse.create({ data: { code: 'PRINCIPAL', name: 'Dépôt principal' } });
+  }
+  let location = await prisma.location.findFirst({ where: { warehouseId: warehouse.id, code: 'DEFAULT' } });
+  if (!location) {
+    location = await prisma.location.create({
+      data: { warehouseId: warehouse.id, code: 'DEFAULT', label: 'Emplacement par défaut' },
+    });
+  }
 
   for (const r of rows) {
-    const nr = str(r["Nr mouvement"]);
-    const articleCode = str(r["Code article"]);
-    if (!nr || !articleCode) { skip++; continue; }
+    const articleCode = str(r['Code article'] ?? r['Article'] ?? r['code_article'] ?? r['Référence']);
+    const lotNumber   = str(r['Lot'] ?? r['N° lot'] ?? r['lot'] ?? r['NumLot']);
+    const qtyRaw      = num(r['Quantité'] ?? r['Qté'] ?? r['qty'] ?? r['quantite']);
+
+    if (!articleCode || !lotNumber || qtyRaw === null) { skip++; continue; }
 
     const article = await prisma.article.findUnique({ where: { code: articleCode } });
-    if (!article) {
-      console.warn(`  ⚠ Article inconnu "${articleCode}" (mouvement ${nr})`);
-      skip++;
-      continue;
-    }
+    if (!article) { console.warn(`   ⚠  Article "${articleCode}" introuvable`); skip++; continue; }
 
-    const mvtType = toMovementType(str(r["Type mouvement"]));
-    const direction = toDirection(mvtType);
-    const movedAt = xDate(r["Date de mouvement"]) ?? new Date();
-    const qty = dec(r["Quantité"]) ?? 0;
-
-    const lotNumber = str(r["Lot"]) ?? "I";
-    let lot = await prisma.stockLot.findUnique({
+    // Lot
+    const lot = await prisma.stockLot.upsert({
       where: { articleId_lotNumber: { articleId: article.id, lotNumber } },
+      update: { quantity: qtyRaw, locationId: location.id },
+      create: {
+        articleId:  article.id,
+        lotNumber,
+        quantity:   qtyRaw,
+        locationId: location.id,
+        receivedAt: excelDate(r['Date réception'] ?? r['DateReception']) ?? new Date(),
+        expiryDate: excelDate(r['Date expiration'] ?? r['DateExpiration']),
+        coutRevient: num(r['Coût revient'] ?? r['CoutRevient'] ?? r['cout']),
+      },
     });
-    if (!lot) {
-      lot = await prisma.stockLot.create({
-        data: { articleId: article.id, lotNumber, quantity: 0 },
-      });
-    }
 
+    // Mouvement d'entrée initial (si pas encore existant)
     const existing = await prisma.movement.findFirst({
-      where: { referenceType: "IMPORT", referenceId: nr, itemId: article.id },
+      where: { referenceType: 'IMPORT', referenceId: `LOT-${lot.id}` },
     });
-    if (existing) { skip++; continue; }
-
-    try {
-      const mvt = await prisma.movement.create({
+    if (!existing) {
+      await prisma.movement.create({
         data: {
-          movedAt,
-          direction,
-          type: mvtType,
-          quantity: qty,
-          referenceType: "IMPORT",
-          referenceId: nr,
-          note: str(r["Motif de mouvement"]),
-          itemId: article.id,
-          lotId: lot.id,
-          createdById: importUser.id,
+          direction:    'ENTREE' as MovementDirection,
+          type:         'RECEIPT' as MovementType,
+          quantity:     qtyRaw,
+          referenceType: 'IMPORT',
+          referenceId:  `LOT-${lot.id}`,
+          itemId:       article.id,
+          lotId:        lot.id,
+          createdById:  systemUserId,
+          toLocationId: location.id,
+          note:         'Import Excel initial',
         },
       });
-
-      await prisma.stockMovementLine.create({
-        data: {
-          movementId: mvt.id,
-          articleId: article.id,
-          lotId: lot.id,
-          quantity: qty,
-          unitCost: dec(r["Prix d'achat"]),
-        },
-      });
-
-      ok++;
-    } catch (e: any) {
-      console.error(`  ⚠ Mouvement ${nr} / ${articleCode}: ${e.message}`);
-      err++;
     }
+    ok++;
   }
-  console.log(`  ✔ ${ok} mouvements importés, ${skip} ignorés, ${err} erreurs`);
+  console.log(`   ✅ ${ok} lots importés, ${skip} ignorés`);
 }
 
-// ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────────
+// ─── 5. COMMANDES FOURNISSEUR ─────────────────────────────────────────────────
+// Règles :
+//   - Le lot est renseigné sur chaque ligne (PurchaseOrderLine.lotNumber)
+//   - qtyDone < qty  → statut PARTIALLY_DELIVERED, commande reste ouverte
+//   - qtyDone >= qty → statut DELIVERED
+//   - qtyDone = 0    → statut CONFIRMED
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function importVentes(wb: import("xlsx").WorkBook) {
-  console.log("\n🛒  Commandes clients...");
-  const rows = readSheet(wb, "Vente");
+async function importCommandesFournisseur(rows: Record<string, unknown>[]) {
+  console.log(`\n🛒 Commandes fournisseur : ${rows.length} lignes`);
+  let ok = 0, skip = 0;
 
-  const grouped = new Map<string, any[]>();
-  let skip = 0;
+  // Regrouper les lignes par numéro de commande
+  const grouped = new Map<string, Record<string, unknown>[]>();
   for (const r of rows) {
-    const nr = str(r["Nr Commande"]);
-    if (!nr) { skip++; continue; }
-    if (!grouped.has(nr)) grouped.set(nr, []);
-    grouped.get(nr)!.push(r);
+    const num = str(r['N° commande'] ?? r['NumCommande'] ?? r['numero'] ?? r['Commande']);
+    if (!num) { skip++; continue; }
+    if (!grouped.has(num)) grouped.set(num, []);
+    grouped.get(num)!.push(r);
   }
 
-  console.log(`  → ${grouped.size} commandes vente (${skip} lignes sans N°)`);
-  let ok = 0, err = 0;
+  for (const [number, lignes] of grouped) {
+    const first = lignes[0];
 
-  for (const [nr, lines] of grouped) {
-    const first = lines[0];
-    const clientName = str(first["Client"]);
-    let customerId: number | undefined;
-    if (clientName) {
-      const c = await prisma.customer.findFirst({
-        where: { etablissement: { contains: clientName, mode: "insensitive" } },
-      });
-      customerId = c?.id;
+    // Fournisseur
+    const supplierCode = str(first['Code fournisseur'] ?? first['Fournisseur'] ?? first['fournisseur']);
+    let supplierId: number | null = null;
+    if (supplierCode) {
+      const s = await prisma.supplier.findUnique({ where: { code: supplierCode } });
+      supplierId = s?.id ?? null;
     }
 
-    try {
-      const order = await prisma.salesOrder.upsert({
-        where: { number: nr },
-        update: {},
-        create: {
-          number: nr,
-          customerId,
-          referenceClient: str(first["Référence cde"]),
-          numDevis: str(first["N° devis"]),
-          delai: str(first["Délai"]),
-          dateFacturation: xDate(first["Date de facturation"]),
-          dateEncaissement: xDate(first["Date encaissement"]),
-          commentaire: str(first["Date de Cde"])
-            ? `Date cde: ${str(first["Date de Cde"])}`
-            : null,
-        },
+    // Calcul statut depuis les lignes
+    const lineData: { qty: number; qtyDone: number }[] = [];
+    for (const l of lignes) {
+      const q  = num(l['Qté commandée'] ?? l['qty'] ?? l['Quantité']);
+      const qd = num(l['Qté reçue']    ?? l['qtyDone'] ?? l['Reçu']) ?? 0;
+      if (q !== null) lineData.push({ qty: q, qtyDone: qd });
+    }
+    const status = computeDocStatus(lineData);
+
+    // Upsert entête
+    const order = await prisma.purchaseOrder.upsert({
+      where: { number },
+      update: {
+        supplierId,
+        status,
+        refDevisFournisseur:  str(first['Réf devis fourn'] ?? first['RefDevis']),
+        dateDevisFournisseur: excelDate(first['Date devis fourn'] ?? first['DateDevis']),
+        dateLivraisonPrevue:  excelDate(first['Date livraison prévue'] ?? first['DateLivPrevue']),
+        dateLivraisonReelle:  excelDate(first['Date livraison réelle'] ?? first['DateLivReelle']),
+        commentaire:          str(first['Commentaire'] ?? first['commentaire']),
+      },
+      create: {
+        number,
+        supplierId,
+        status,
+        refDevisFournisseur:  str(first['Réf devis fourn'] ?? first['RefDevis']),
+        dateDevisFournisseur: excelDate(first['Date devis fourn'] ?? first['DateDevis']),
+        dateLivraisonPrevue:  excelDate(first['Date livraison prévue'] ?? first['DateLivPrevue']),
+        dateLivraisonReelle:  excelDate(first['Date livraison réelle'] ?? first['DateLivReelle']),
+        commentaire:          str(first['Commentaire'] ?? first['commentaire']),
+        createdAt:            excelDate(first['Date commande'] ?? first['DateCommande']) ?? new Date(),
+      },
+    });
+
+    // Lignes
+    for (const l of lignes) {
+      const articleCode = str(l['Code article'] ?? l['Article'] ?? l['Référence']);
+      if (!articleCode) continue;
+      const article = await prisma.article.findUnique({ where: { code: articleCode } });
+      if (!article) { console.warn(`   ⚠  Article "${articleCode}" introuvable (CF ${number})`); continue; }
+
+      const qty     = num(l['Qté commandée'] ?? l['qty'] ?? l['Quantité']) ?? 0;
+      const qtyDone = num(l['Qté reçue']    ?? l['qtyDone'] ?? l['Reçu'])  ?? 0;
+      // Lot attendu renseigné sur la ligne de commande
+      const lotNumber = str(l['Lot'] ?? l['N° lot'] ?? l['lot'] ?? l['NumLot']);
+
+      // Upsert ligne (idempotent sur orderId + itemId)
+      const existingLine = await prisma.purchaseOrderLine.findFirst({
+        where: { orderId: order.id, itemId: article.id },
       });
-
-      for (const line of lines) {
-        const code = str(line["Code"]);
-        if (!code) continue;
-        const article = await prisma.article.findUnique({ where: { code } });
-        if (!article) continue;
-
-        const exists = await prisma.salesOrderLine.findFirst({
-          where: { orderId: order.id, itemId: article.id },
+      if (existingLine) {
+        await prisma.purchaseOrderLine.update({
+          where: { id: existingLine.id },
+          data: { qty, qtyDone, unitPrice: num(l['Prix unitaire'] ?? l['PU'] ?? l['prix']), lotNumber },
         });
-        if (!exists) {
-          await prisma.salesOrderLine.create({
-            data: {
-              orderId: order.id,
-              itemId: article.id,
-              qty: dec(line["Qté"]) ?? 0,
-              qtyDone: dec(line["Livré"]) ?? 0,
-              unitPrice: dec(line["Prix"]),
-              prixTotal: dec(line["Prix total"]),
-            },
-          });
-        }
+      } else {
+        await prisma.purchaseOrderLine.create({
+          data: {
+            orderId:   order.id,
+            itemId:    article.id,
+            qty,
+            qtyDone,
+            unitPrice: num(l['Prix unitaire'] ?? l['PU'] ?? l['prix']),
+            lotNumber,  // ← lot attendu pré-renseigné
+          },
+        });
       }
-      ok++;
-    } catch (e: any) {
-      console.error(`  ⚠ Vente ${nr}: ${e.message}`);
-      err++;
     }
+    ok++;
   }
-  console.log(`  ✔ ${ok} commandes vente, ${err} erreurs`);
+  console.log(`   ✅ ${ok} commandes importées, ${skip} lignes ignorées (numéro manquant)`);
 }
 
-// ── 6. COMMANDES FOURNISSEUR ──────────────────────────────────────────────────
+// ─── 6. COMMANDES CLIENT ──────────────────────────────────────────────────────
 
-async function importCommandesF(wb: import("xlsx").WorkBook) {
-  console.log("\n📋  Commandes fournisseur...");
-  const rows = readSheet(wb, "Commande_F");
+async function importCommandesClient(rows: Record<string, unknown>[]) {
+  console.log(`\n📋 Commandes client : ${rows.length} lignes`);
+  let ok = 0, skip = 0;
 
-  const grouped = new Map<string, any[]>();
-  let skip = 0;
+  const grouped = new Map<string, Record<string, unknown>[]>();
   for (const r of rows) {
-    const nr = str(r["Nr Commande"]);
-    if (!nr) { skip++; continue; }
-    if (!grouped.has(nr)) grouped.set(nr, []);
-    grouped.get(nr)!.push(r);
+    const n = str(r['N° commande'] ?? r['NumCommande'] ?? r['numero'] ?? r['Commande']);
+    if (!n) { skip++; continue; }
+    if (!grouped.has(n)) grouped.set(n, []);
+    grouped.get(n)!.push(r);
   }
 
-  console.log(`  → ${grouped.size} commandes fournisseur (${skip} lignes sans N°)`);
-  let ok = 0, err = 0;
+  for (const [number, lignes] of grouped) {
+    const first = lignes[0];
 
-  for (const [nr, lines] of grouped) {
-    const first = lines[0];
-    const supplierName = str(first["Fournisseur"]);
-    let supplierId: number | undefined;
-    if (supplierName) {
-      const s = await prisma.supplier.findFirst({
-        where: { name: { contains: supplierName, mode: "insensitive" } },
-      });
-      supplierId = s?.id;
+    const customerCode = str(first['Code client'] ?? first['Client'] ?? first['client']);
+    let customerId: number | null = null;
+    if (customerCode) {
+      const c = await prisma.customer.findUnique({ where: { code: customerCode } });
+      customerId = c?.id ?? null;
     }
 
-    try {
-      const order = await prisma.purchaseOrder.upsert({
-        where: { number: nr },
-        update: {},
-        create: {
-          number: nr,
-          supplierId,
-          dateLivraisonPrevue: xDate(first["Délai souhaité"]),
-          dateLivraisonReelle: xDate(first["Date réception"]),
-          refDevisFournisseur: str(first["Numéro_ARC"]),
-          dateDevisFournisseur: xDate(first["Délai_ARC"]),
-          commentaire: str(first["Date de Cde"])
-            ? `Date cde: ${str(first["Date de Cde"])}`
-            : null,
-        },
+    const lineData: { qty: number; qtyDone: number }[] = [];
+    for (const l of lignes) {
+      const q  = num(l['Qté commandée'] ?? l['qty'] ?? l['Quantité']);
+      const qd = num(l['Qté livrée']   ?? l['qtyDone'] ?? l['Livré']) ?? 0;
+      if (q !== null) lineData.push({ qty: q, qtyDone: qd });
+    }
+    const status = computeDocStatus(lineData);
+
+    const order = await prisma.salesOrder.upsert({
+      where: { number },
+      update: {
+        customerId,
+        status,
+        referenceClient: str(first['Réf client'] ?? first['RefClient']),
+        numDevis:        str(first['N° devis'] ?? first['NumDevis']),
+        delai:           str(first['Délai'] ?? first['delai']),
+        dateFacturation: excelDate(first['Date facturation'] ?? first['DateFact']),
+        commentaire:     str(first['Commentaire'] ?? first['commentaire']),
+      },
+      create: {
+        number,
+        customerId,
+        status,
+        referenceClient: str(first['Réf client'] ?? first['RefClient']),
+        numDevis:        str(first['N° devis'] ?? first['NumDevis']),
+        delai:           str(first['Délai'] ?? first['delai']),
+        dateFacturation: excelDate(first['Date facturation'] ?? first['DateFact']),
+        commentaire:     str(first['Commentaire'] ?? first['commentaire']),
+        createdAt:       excelDate(first['Date commande'] ?? first['DateCommande']) ?? new Date(),
+      },
+    });
+
+    for (const l of lignes) {
+      const articleCode = str(l['Code article'] ?? l['Article'] ?? l['Référence']);
+      if (!articleCode) continue;
+      const article = await prisma.article.findUnique({ where: { code: articleCode } });
+      if (!article) { console.warn(`   ⚠  Article "${articleCode}" introuvable (CC ${number})`); continue; }
+
+      const qty     = num(l['Qté commandée'] ?? l['qty'] ?? l['Quantité']) ?? 0;
+      const qtyDone = num(l['Qté livrée']   ?? l['qtyDone'] ?? l['Livré'])  ?? 0;
+      const unitPrice = num(l['Prix unitaire'] ?? l['PU'] ?? l['prix']);
+
+      const existingLine = await prisma.salesOrderLine.findFirst({
+        where: { orderId: order.id, itemId: article.id },
       });
-
-      for (const line of lines) {
-        const code = str(line["Code"]);
-        if (!code) continue;
-        const article = await prisma.article.findUnique({ where: { code } });
-        if (!article) continue;
-
-        const exists = await prisma.purchaseOrderLine.findFirst({
-          where: { orderId: order.id, itemId: article.id },
+      if (existingLine) {
+        await prisma.salesOrderLine.update({
+          where: { id: existingLine.id },
+          data: { qty, qtyDone, unitPrice, prixTotal: unitPrice ? qty * unitPrice : null },
         });
-        if (!exists) {
-          await prisma.purchaseOrderLine.create({
-            data: {
-              orderId: order.id,
-              itemId: article.id,
-              qty: dec(line["Qté"]) ?? 0,
-              qtyDone: dec(line["Qté reçue"]) ?? 0,
-              unitPrice: dec(line["Prix"]),
-            },
-          });
-        }
+      } else {
+        await prisma.salesOrderLine.create({
+          data: {
+            orderId: order.id,
+            itemId:  article.id,
+            qty,
+            qtyDone,
+            unitPrice,
+            prixTotal: unitPrice ? qty * unitPrice : null,
+          },
+        });
       }
-      ok++;
-    } catch (e: any) {
-      console.error(`  ⚠ CmdF ${nr}: ${e.message}`);
-      err++;
     }
+    ok++;
   }
-  console.log(`  ✔ ${ok} commandes fournisseur, ${err} erreurs`);
+  console.log(`   ✅ ${ok} commandes importées, ${skip} lignes ignorées`);
 }
 
-// ── MAIN ──────────────────────────────────────────────────────────────────────
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("📂  Lecture du fichier Excel...");
-  const wb = XLSX.readFile(FILE);
-  console.log(`✔  Onglets : ${wb.SheetNames.join(", ")}\n`);
+  console.log('🚀 Démarrage de l\'import Excel...');
+  console.log(`   Fichier : ${FILE}`);
 
-  try {
-    await importFournisseurs(wb);
-    await importArticles(wb);
-    await importClients(wb);
-    await importMouvements(wb);
-    await importVentes(wb);
-    await importCommandesF(wb);
-    console.log("\n✅  Import terminé !");
-  } finally {
-    await prisma.$disconnect();
-  }
+  const wb = XLSX.readFile(FILE);
+  console.log(`   Feuilles détectées : ${wb.SheetNames.join(', ')}`);
+
+  const systemUserId = await ensureSystemUser();
+
+  await importFournisseurs(readSheet(wb, 'Fournisseurs'));
+  await importArticles(readSheet(wb, 'Articles'));
+  await importClients(readSheet(wb, 'Clients'));
+  await importStock(readSheet(wb, 'Stock'), systemUserId);
+  await importCommandesFournisseur(readSheet(wb, 'Commandes fournisseur'));
+  await importCommandesClient(readSheet(wb, 'Commandes client'));
+
+  console.log('\n🎉 Import terminé avec succès !');
 }
 
-main().catch((e) => {
-  console.error("\n❌  Erreur fatale:", e);
-  process.exit(1);
-});
+main()
+  .catch((e) => { console.error('❌ Erreur :', e); process.exit(1); })
+  .finally(() => prisma.$disconnect());

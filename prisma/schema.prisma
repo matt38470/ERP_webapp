@@ -368,19 +368,17 @@ model KitComponent {
 
 // ─────────────────────────────────────────────
 // SUIVI PRÊTS / DÉMOS / VENTES DE KITS
-// Un KitLoan trace chaque sortie d'un article de type KIT
-// vers un client (prêt, démo, ou vente directe de kit)
 // ─────────────────────────────────────────────
 
 model KitLoan {
   id         Int           @id @default(autoincrement())
-  articleId  Int           // article de type KIT
+  articleId  Int
   customerId Int
-  type       KitLoanType   // DEMO | LOAN | SALE
+  type       KitLoanType
   status     KitLoanStatus @default(EN_COURS)
   sentAt     DateTime      @default(now())
-  returnedAt DateTime?     // null = toujours chez le client
-  contact    String?       // interlocuteur chez le client
+  returnedAt DateTime?
+  contact    String?
   note       String?
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
@@ -568,6 +566,9 @@ model PurchaseOrderLine {
   qty       Decimal  @db.Decimal(18, 4)
   qtyDone   Decimal  @default(0) @db.Decimal(18, 4)
   unitPrice Decimal? @db.Decimal(18, 4)
+  // Lot attendu renseigné à la saisie de la commande fournisseur.
+  // Repris automatiquement lors de la réception (partielle ou totale).
+  lotNumber String?
 
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Article       @relation(fields: [itemId], references: [id], onDelete: Restrict)
