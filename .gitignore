@@ -4,3 +4,4 @@ node_modules/
 *.log
 dist/
 prisma/dev.db
+Gestion_stock.xlsx
