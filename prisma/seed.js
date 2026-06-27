@@ -2,21 +2,32 @@ const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 
 async function main() {
+  // Nettoyage dans l'ordre des dépendances
   await prisma.stockMovementLine.deleteMany()
   await prisma.movement.deleteMany()
   await prisma.stockLot.deleteMany()
   await prisma.kitComponent.deleteMany()
+  await prisma.kitLoan.deleteMany()
   await prisma.salesOrderLine.deleteMany()
   await prisma.purchaseOrderLine.deleteMany()
   await prisma.deliveryNote.deleteMany()
   await prisma.invoice.deleteMany()
   await prisma.salesOrder.deleteMany()
   await prisma.purchaseOrder.deleteMany()
+  await prisma.priceListItem.deleteMany()
+  await prisma.priceList.deleteMany()
+  await prisma.supplierPrice.deleteMany()
   await prisma.location.deleteMany()
   await prisma.warehouse.deleteMany()
   await prisma.article.deleteMany()
+  await prisma.customer.deleteMany()
+  await prisma.supplier.deleteMany()
+  await prisma.country.deleteMany()
+  await prisma.customerGroup.deleteMany()
+  await prisma.movementReason.deleteMany()
   await prisma.user.deleteMany()
 
+  // Utilisateur
   const user = await prisma.user.create({
     data: {
       email: 'admin@local.test',
@@ -25,6 +36,12 @@ async function main() {
     },
   })
 
+  // Pays
+  const france = await prisma.country.create({
+    data: { code: 'FR', name: 'France' },
+  })
+
+  // Entrepôt + emplacements
   const wh = await prisma.warehouse.create({
     data: {
       code: 'WH1',
@@ -36,34 +53,38 @@ async function main() {
         ],
       },
     },
+    include: { locations: true },
   })
 
-const a1 = await prisma.article.create({
-  data: {
-    code: 'IN000214',
-    designationFr: 'Clou intramédullaire verrouillé 3,5mm Lg 102mm',
-    designationEn: 'Locked intramedullary nail 3.5mm L 102mm',
-    type: 'SIMPLE',
-  },
-})
+  const mainLocation = wh.locations.find((l) => l.code === 'MAIN')
 
-const a2 = await prisma.article.create({
-  data: {
-    code: 'IN000215',
-    designationFr: 'Clou intramédullaire verrouillé 3,5mm Lg 118mm',
-    designationEn: 'Locked intramedullary nail 3.5mm L 118mm',
-    type: 'SIMPLE',
-  },
-})
+  // Articles
+  const a1 = await prisma.article.create({
+    data: {
+      code: 'IN000214',
+      designationFr: 'Clou intramédullaire verrouillé 3,5mm Lg 102mm',
+      designationEn: 'Locked intramedullary nail 3.5mm L 102mm',
+      type: 'SIMPLE',
+    },
+  })
 
-const kit = await prisma.article.create({
-  data: {
-    code: 'IS000001',
-    designationFr: 'Kit démonstration 3,5mm',
-    designationEn: '3.5mm demo kit',
-    type: 'KIT',
-  },
-})
+  const a2 = await prisma.article.create({
+    data: {
+      code: 'IN000215',
+      designationFr: 'Clou intramédullaire verrouillé 3,5mm Lg 118mm',
+      designationEn: 'Locked intramedullary nail 3.5mm L 118mm',
+      type: 'SIMPLE',
+    },
+  })
+
+  const kit = await prisma.article.create({
+    data: {
+      code: 'IS000001',
+      designationFr: 'Kit démonstration 3,5mm',
+      designationEn: '3.5mm demo kit',
+      type: 'KIT',
+    },
+  })
 
   await prisma.kitComponent.createMany({
     data: [
@@ -72,55 +93,54 @@ const kit = await prisma.article.create({
     ],
   })
 
+  // Lots — locationId à la place de location
   const lot1 = await prisma.stockLot.create({
     data: {
-      articleId: a1.id,
-      lotNumber: 'LOT-A1',
-      quantity: '10',
-      status: 'AVAILABLE',
-      location: 'MAIN',
+      articleId:  a1.id,
+      lotNumber:  'LOT-A1',
+      quantity:   '10',
+      status:     'AVAILABLE',
+      locationId: mainLocation.id,
     },
   })
 
   const lot2 = await prisma.stockLot.create({
     data: {
-      articleId: a2.id,
-      lotNumber: 'LOT-A2',
-      quantity: '8',
-      status: 'AVAILABLE',
-      location: 'MAIN',
+      articleId:  a2.id,
+      lotNumber:  'LOT-A2',
+      quantity:   '8',
+      status:     'AVAILABLE',
+      locationId: mainLocation.id,
     },
   })
 
-const customer = await prisma.customer.create({
-  data: {
-    code: 'CUST-001',
-    name: 'Client test',
-    country: {
-      create: {
-        code: 'FR',
-        name: 'France',
+  // Client — plus de champ `name`, utiliser nom/etablissement + countryId
+  const customer = await prisma.customer.create({
+    data: {
+      code:         'CUST-001',
+      etablissement: 'Client test',
+      countryId:    france.id,
+    },
+  })
+
+  // Commande client
+  const order = await prisma.salesOrder.create({
+    data: {
+      number: 'SO-0001',
+      status: 'DRAFT',
+      customer: {
+        connect: { id: customer.id },
+      },
+      lines: {
+        create: [
+          { itemId: kit.id, qty: '2', qtyDone: '0' },
+        ],
       },
     },
-  },
-})
+  })
 
-const order = await prisma.salesOrder.create({
-  data: {
-    number: 'SO-0001',
-    status: 'DRAFT',
-    customer: {
-      connect: { id: customer.id },
-    },
-    lines: {
-      create: [
-        { itemId: kit.id, qty: '2', qtyDone: '0' },
-      ],
-    },
-  },
-})
-
-  console.log({ user, wh, a1, a2, kit, lot1, lot2, order })
+  console.log('✅ Seed terminé')
+  console.log({ user, wh: wh.code, a1: a1.code, a2: a2.code, kit: kit.code, lot1: lot1.lotNumber, lot2: lot2.lotNumber, customer: customer.code, order: order.number })
 }
 
 main()
