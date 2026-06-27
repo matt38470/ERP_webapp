@@ -18,11 +18,17 @@
 import * as XLSX from "xlsx";
 import { PrismaClient, MovementDirection, MovementType } from "@prisma/client";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
 const prisma = new PrismaClient();
+
+// Compatibilité ESM : __dirname n'existe pas en ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const FILE = path.join(__dirname, "..", "Gestion_stock.xlsx");
 
-// ── Helpers ────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function readSheet(wb: XLSX.WorkBook, name: string, headerRow = 5) {
   const ws = wb.Sheets[name];
@@ -79,7 +85,7 @@ function toDirection(type: MovementType): MovementDirection {
     : MovementDirection.ENTREE;
 }
 
-// ── 1. FOURNISSEURS ─────────────────────────────────────────────────────
+// ── 1. FOURNISSEURS ───────────────────────────────────────────────────────────
 
 async function importFournisseurs(wb: XLSX.WorkBook) {
   console.log("\n📦  Fournisseurs...");
@@ -122,7 +128,7 @@ async function importFournisseurs(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} fournisseurs, ${skip} ignorés`);
 }
 
-// ── 2. ARTICLES ──────────────────────────────────────────────────────────
+// ── 2. ARTICLES ───────────────────────────────────────────────────────────────
 
 async function importArticles(wb: XLSX.WorkBook) {
   console.log("\n🔩  Articles...");
@@ -152,7 +158,7 @@ async function importArticles(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} articles, ${skip} ignorés`);
 }
 
-// ── 3. CLIENTS ────────────────────────────────────────────────────────────
+// ── 3. CLIENTS ────────────────────────────────────────────────────────────────
 
 async function importClients(wb: XLSX.WorkBook) {
   console.log("\n👤  Clients...");
@@ -202,9 +208,7 @@ async function importClients(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} clients, ${skip} ignorés`);
 }
 
-// ── 4. MOUVEMENTS ────────────────────────────────────────────────────────
-// Dans le schéma, Movement a un itemId obligatoire :
-// chaque ligne Excel = 1 Movement + optionnellement 1 StockMovementLine
+// ── 4. MOUVEMENTS ─────────────────────────────────────────────────────────────
 
 async function importMouvements(wb: XLSX.WorkBook) {
   console.log("\n🔄  Mouvements...");
@@ -235,7 +239,6 @@ async function importMouvements(wb: XLSX.WorkBook) {
     const movedAt = xDate(r["Date de mouvement"]) ?? new Date();
     const qty = dec(r["Quantité"]) ?? 0;
 
-    // Lot
     const lotNumber = str(r["Lot"]) ?? "I";
     let lot = await prisma.stockLot.findUnique({
       where: { articleId_lotNumber: { articleId: article.id, lotNumber } },
@@ -246,7 +249,6 @@ async function importMouvements(wb: XLSX.WorkBook) {
       });
     }
 
-    // Vérification doublon : même nr + même article
     const existing = await prisma.movement.findFirst({
       where: { referenceType: "IMPORT", referenceId: nr, itemId: article.id },
     });
@@ -268,7 +270,6 @@ async function importMouvements(wb: XLSX.WorkBook) {
         },
       });
 
-      // Ligne de détail (optionnelle)
       await prisma.stockMovementLine.create({
         data: {
           movementId: mvt.id,
@@ -288,7 +289,7 @@ async function importMouvements(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} mouvements importés, ${skip} ignorés, ${err} erreurs`);
 }
 
-// ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────
+// ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────────
 
 async function importVentes(wb: XLSX.WorkBook) {
   console.log("\n🛒  Commandes clients...");
@@ -366,7 +367,7 @@ async function importVentes(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} commandes vente, ${err} erreurs`);
 }
 
-// ── 6. COMMANDES FOURNISSEUR ────────────────────────────────────────────────
+// ── 6. COMMANDES FOURNISSEUR ──────────────────────────────────────────────────
 
 async function importCommandesF(wb: XLSX.WorkBook) {
   console.log("\n📋  Commandes fournisseur...");
@@ -442,7 +443,7 @@ async function importCommandesF(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} commandes fournisseur, ${err} erreurs`);
 }
 
-// ── MAIN ──────────────────────────────────────────────────────────────────
+// ── MAIN ──────────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log("📂  Lecture du fichier Excel...");
