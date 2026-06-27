@@ -15,22 +15,25 @@
  * Deps  : npm install xlsx
  */
 
-import * as XLSX from "xlsx";
+// xlsx est un module CommonJS — on l'importe via createRequire pour compatibilité ESM
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const XLSX = require("xlsx") as typeof import("xlsx");
+
 import { PrismaClient, MovementDirection, MovementType } from "@prisma/client";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
 const prisma = new PrismaClient();
 
-// Compatibilité ESM : __dirname n'existe pas en ES module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const FILE = path.join(__dirname, "..", "Gestion_stock.xlsx");
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────
 
-function readSheet(wb: XLSX.WorkBook, name: string, headerRow = 5) {
+function readSheet(wb: import("xlsx").WorkBook, name: string, headerRow = 5) {
   const ws = wb.Sheets[name];
   if (!ws) throw new Error(`Onglet "${name}" introuvable`);
   return XLSX.utils.sheet_to_json<Record<string, any>>(ws, {
@@ -87,7 +90,7 @@ function toDirection(type: MovementType): MovementDirection {
 
 // ── 1. FOURNISSEURS ───────────────────────────────────────────────────────────
 
-async function importFournisseurs(wb: XLSX.WorkBook) {
+async function importFournisseurs(wb: import("xlsx").WorkBook) {
   console.log("\n📦  Fournisseurs...");
   const rows = readSheet(wb, "Fournisseur");
   let ok = 0, skip = 0;
@@ -130,7 +133,7 @@ async function importFournisseurs(wb: XLSX.WorkBook) {
 
 // ── 2. ARTICLES ───────────────────────────────────────────────────────────────
 
-async function importArticles(wb: XLSX.WorkBook) {
+async function importArticles(wb: import("xlsx").WorkBook) {
   console.log("\n🔩  Articles...");
   const rows = readSheet(wb, "Article_stock");
   let ok = 0, skip = 0;
@@ -160,7 +163,7 @@ async function importArticles(wb: XLSX.WorkBook) {
 
 // ── 3. CLIENTS ────────────────────────────────────────────────────────────────
 
-async function importClients(wb: XLSX.WorkBook) {
+async function importClients(wb: import("xlsx").WorkBook) {
   console.log("\n👤  Clients...");
   const rows = readSheet(wb, "Client");
   let ok = 0, skip = 0;
@@ -210,7 +213,7 @@ async function importClients(wb: XLSX.WorkBook) {
 
 // ── 4. MOUVEMENTS ─────────────────────────────────────────────────────────────
 
-async function importMouvements(wb: XLSX.WorkBook) {
+async function importMouvements(wb: import("xlsx").WorkBook) {
   console.log("\n🔄  Mouvements...");
   const rows = readSheet(wb, "Mouvement");
 
@@ -291,7 +294,7 @@ async function importMouvements(wb: XLSX.WorkBook) {
 
 // ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────────
 
-async function importVentes(wb: XLSX.WorkBook) {
+async function importVentes(wb: import("xlsx").WorkBook) {
   console.log("\n🛒  Commandes clients...");
   const rows = readSheet(wb, "Vente");
 
@@ -369,7 +372,7 @@ async function importVentes(wb: XLSX.WorkBook) {
 
 // ── 6. COMMANDES FOURNISSEUR ──────────────────────────────────────────────────
 
-async function importCommandesF(wb: XLSX.WorkBook) {
+async function importCommandesF(wb: import("xlsx").WorkBook) {
   console.log("\n📋  Commandes fournisseur...");
   const rows = readSheet(wb, "Commande_F");
 
