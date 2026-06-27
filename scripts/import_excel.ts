@@ -7,7 +7,7 @@
  *  1. Supplier        (onglet Fournisseur)
  *  2. Article         (onglet Article_stock)
  *  3. Customer        (onglet Client)
- *  4. Mouvement       (onglet Mouvement  → Movement + StockMovementLine)
+ *  4. Mouvement       (onglet Mouvement  → Movement + StockMovementLine par ligne)
  *  5. SalesOrder      (onglet Vente      → SalesOrder + SalesOrderLine)
  *  6. PurchaseOrder   (onglet Commande_F → PurchaseOrder + PurchaseOrderLine)
  *
@@ -22,7 +22,7 @@ import * as path from "path";
 const prisma = new PrismaClient();
 const FILE = path.join(__dirname, "..", "Gestion_stock.xlsx");
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────
 
 function readSheet(wb: XLSX.WorkBook, name: string, headerRow = 5) {
   const ws = wb.Sheets[name];
@@ -79,7 +79,7 @@ function toDirection(type: MovementType): MovementDirection {
     : MovementDirection.ENTREE;
 }
 
-// ── 1. FOURNISSEURS ───────────────────────────────────────────────────────────
+// ── 1. FOURNISSEURS ─────────────────────────────────────────────────────
 
 async function importFournisseurs(wb: XLSX.WorkBook) {
   console.log("\n📦  Fournisseurs...");
@@ -122,7 +122,7 @@ async function importFournisseurs(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} fournisseurs, ${skip} ignorés`);
 }
 
-// ── 2. ARTICLES ───────────────────────────────────────────────────────────────
+// ── 2. ARTICLES ──────────────────────────────────────────────────────────
 
 async function importArticles(wb: XLSX.WorkBook) {
   console.log("\n🔩  Articles...");
@@ -152,7 +152,7 @@ async function importArticles(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} articles, ${skip} ignorés`);
 }
 
-// ── 3. CLIENTS ────────────────────────────────────────────────────────────────
+// ── 3. CLIENTS ────────────────────────────────────────────────────────────
 
 async function importClients(wb: XLSX.WorkBook) {
   console.log("\n👤  Clients...");
@@ -202,7 +202,9 @@ async function importClients(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} clients, ${skip} ignorés`);
 }
 
-// ── 4. MOUVEMENTS ─────────────────────────────────────────────────────────────
+// ── 4. MOUVEMENTS ────────────────────────────────────────────────────────
+// Dans le schéma, Movement a un itemId obligatoire :
+// chaque ligne Excel = 1 Movement + optionnellement 1 StockMovementLine
 
 async function importMouvements(wb: XLSX.WorkBook) {
   console.log("\n🔄  Mouvements...");
@@ -214,84 +216,79 @@ async function importMouvements(wb: XLSX.WorkBook) {
     create: { email: "import@system.local", name: "Import Excel", role: "admin" },
   });
 
-  const grouped = new Map<string, any[]>();
-  let skip = 0;
+  let ok = 0, skip = 0, err = 0;
+
   for (const r of rows) {
     const nr = str(r["Nr mouvement"]);
-    if (!nr) { skip++; continue; }
-    if (!grouped.has(nr)) grouped.set(nr, []);
-    grouped.get(nr)!.push(r);
-  }
+    const articleCode = str(r["Code article"]);
+    if (!nr || !articleCode) { skip++; continue; }
 
-  console.log(`  → ${grouped.size} mouvements distincts (${skip} lignes sans N°)`);
-  let ok = 0, err = 0;
+    const article = await prisma.article.findUnique({ where: { code: articleCode } });
+    if (!article) {
+      console.warn(`  ⚠ Article inconnu "${articleCode}" (mouvement ${nr})`);
+      skip++;
+      continue;
+    }
 
-  for (const [nr, lines] of grouped) {
-    const first = lines[0];
-    const mvtType = toMovementType(str(first["Type mouvement"]));
+    const mvtType = toMovementType(str(r["Type mouvement"]));
     const direction = toDirection(mvtType);
-    const movedAt = xDate(first["Date de mouvement"]) ?? new Date();
+    const movedAt = xDate(r["Date de mouvement"]) ?? new Date();
+    const qty = dec(r["Quantité"]) ?? 0;
+
+    // Lot
+    const lotNumber = str(r["Lot"]) ?? "I";
+    let lot = await prisma.stockLot.findUnique({
+      where: { articleId_lotNumber: { articleId: article.id, lotNumber } },
+    });
+    if (!lot) {
+      lot = await prisma.stockLot.create({
+        data: { articleId: article.id, lotNumber, quantity: 0 },
+      });
+    }
+
+    // Vérification doublon : même nr + même article
+    const existing = await prisma.movement.findFirst({
+      where: { referenceType: "IMPORT", referenceId: nr, itemId: article.id },
+    });
+    if (existing) { skip++; continue; }
 
     try {
-      let mvt = await prisma.movement.findFirst({
-        where: { referenceType: "IMPORT", referenceId: nr },
+      const mvt = await prisma.movement.create({
+        data: {
+          movedAt,
+          direction,
+          type: mvtType,
+          quantity: qty,
+          referenceType: "IMPORT",
+          referenceId: nr,
+          note: str(r["Motif de mouvement"]),
+          itemId: article.id,
+          lotId: lot.id,
+          createdById: importUser.id,
+        },
       });
-      if (!mvt) {
-        mvt = await prisma.movement.create({
-          data: {
-            movedAt,
-            direction,
-            type: mvtType,
-            quantity: 0,
-            referenceType: "IMPORT",
-            referenceId: nr,
-            note: str(first["Motif de mouvement"]),
-            createdById: importUser.id,
-          },
-        });
-      }
 
-      for (const line of lines) {
-        const articleCode = str(line["Code article"]);
-        if (!articleCode) continue;
-        const article = await prisma.article.findUnique({ where: { code: articleCode } });
-        if (!article) continue;
+      // Ligne de détail (optionnelle)
+      await prisma.stockMovementLine.create({
+        data: {
+          movementId: mvt.id,
+          articleId: article.id,
+          lotId: lot.id,
+          quantity: qty,
+          unitCost: dec(r["Prix d'achat"]),
+        },
+      });
 
-        const lotNumber = str(line["Lot"]) ?? "I";
-        let lot = await prisma.stockLot.findUnique({
-          where: { articleId_lotNumber: { articleId: article.id, lotNumber } },
-        });
-        if (!lot) {
-          lot = await prisma.stockLot.create({
-            data: { articleId: article.id, lotNumber, quantity: 0 },
-          });
-        }
-
-        const lineExists = await prisma.stockMovementLine.findFirst({
-          where: { movementId: mvt.id, articleId: article.id, lotId: lot.id },
-        });
-        if (!lineExists) {
-          await prisma.stockMovementLine.create({
-            data: {
-              movementId: mvt.id,
-              articleId: article.id,
-              lotId: lot.id,
-              quantity: dec(line["Quantité"]) ?? 0,
-              unitCost: dec(line["Prix d'achat"]),
-            },
-          });
-        }
-      }
       ok++;
     } catch (e: any) {
-      console.error(`  ⚠ Mouvement ${nr}: ${e.message}`);
+      console.error(`  ⚠ Mouvement ${nr} / ${articleCode}: ${e.message}`);
       err++;
     }
   }
-  console.log(`  ✔ ${ok} mouvements importés, ${err} erreurs`);
+  console.log(`  ✔ ${ok} mouvements importés, ${skip} ignorés, ${err} erreurs`);
 }
 
-// ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────────
+// ── 5. COMMANDES CLIENT ───────────────────────────────────────────────────
 
 async function importVentes(wb: XLSX.WorkBook) {
   console.log("\n🛒  Commandes clients...");
@@ -369,7 +366,7 @@ async function importVentes(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} commandes vente, ${err} erreurs`);
 }
 
-// ── 6. COMMANDES FOURNISSEUR ──────────────────────────────────────────────────
+// ── 6. COMMANDES FOURNISSEUR ────────────────────────────────────────────────
 
 async function importCommandesF(wb: XLSX.WorkBook) {
   console.log("\n📋  Commandes fournisseur...");
@@ -445,7 +442,7 @@ async function importCommandesF(wb: XLSX.WorkBook) {
   console.log(`  ✔ ${ok} commandes fournisseur, ${err} erreurs`);
 }
 
-// ── MAIN ──────────────────────────────────────────────────────────────────────
+// ── MAIN ──────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log("📂  Lecture du fichier Excel...");
